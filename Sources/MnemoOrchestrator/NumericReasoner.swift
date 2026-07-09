@@ -11,8 +11,14 @@ public enum NumericReasoner {
         return cues.contains { q.contains($0) }
     }
 
-    /// If the evidence contains ≥2 dates, computes the span between the earliest
-    /// and latest and phrases it (days + weeks) for the model to use verbatim.
+    /// If the evidence contains ≥2 dates, lists them chronologically and gives
+    /// the earliest→latest span as an ADVISORY figure. It deliberately no longer
+    /// forces the model to use the global min→max span verbatim: that span is
+    /// only correct when the earliest and latest dated facts are the two events
+    /// the question is actually about. When an unrelated date is present (e.g. an
+    /// earlier kickoff, or a distractor date elsewhere in the corpus), the global
+    /// span is wrong — so the model is told to pick the correct endpoints from
+    /// context and compute from those.
     public static func durationNote(in evidence: [Retrieved]) -> String? {
         let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.date.rawValue)
         var dates: [Date] = []
@@ -28,6 +34,7 @@ public enum NumericReasoner {
         guard days > 0 else { return nil }
         let weeks = Int(Double(days) / 7 + 0.5)
         let df = DateFormatter(); df.dateStyle = .medium
-        return "Pre-computed from the dated facts: the full span from \(df.string(from: sorted.first!)) to \(df.string(from: sorted.last!)) is \(days) days (~\(weeks) week\(weeks == 1 ? "" : "s")). If the question asks for this duration, use this computed value — do not re-derive it."
+        let chrono = sorted.map { df.string(from: $0) }.joined(separator: ", ")
+        return "Dated facts found (chronological): \(chrono). The earliest→latest span is \(days) days (~\(weeks) week\(weeks == 1 ? "" : "s")). If the question asks for the interval between two specific events, identify the correct start and end dates from the evidence and compute from those — use the earliest→latest span only when those are the actual endpoints."
     }
 }

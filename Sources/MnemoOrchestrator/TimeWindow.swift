@@ -25,10 +25,26 @@ public enum TimeWindow {
         if q.contains("last year") || q.contains("past year") {
             return DateInterval(start: now.addingTimeInterval(-365 * day), end: now)
         }
-        // Named month ("in March") → that month in the current year (or last year if future).
+        // Named month ("in March") → that month in the current year (or last
+        // year if future). Match whole words so "maybe"/"marching" don't fire;
+        // and since "may" is also a modal verb, only treat it as the month when
+        // a temporal cue (a preposition, or an adjacent day/year number) is next
+        // to it — "the release may slip" must NOT become a May date window.
         let months = ["january", "february", "march", "april", "may", "june", "july",
                       "august", "september", "october", "november", "december"]
-        for (idx, name) in months.enumerated() where q.contains(name) {
+        let tokens = q.split { !($0.isLetter || $0.isNumber) }.map(String.init)
+        let cues: Set<String> = ["in", "on", "during", "last", "this", "since",
+                                 "by", "before", "after", "of", "for", "until", "till"]
+        for (idx, name) in months.enumerated() {
+            guard let pos = tokens.firstIndex(of: name) else { continue }
+            if name == "may" {
+                let prev = pos > 0 ? tokens[pos - 1] : ""
+                let next = pos + 1 < tokens.count ? tokens[pos + 1] : ""
+                let cued = cues.contains(prev)
+                    || (!next.isEmpty && next.allSatisfy(\.isNumber))
+                    || (!prev.isEmpty && prev.allSatisfy(\.isNumber))
+                guard cued else { continue }
+            }
             var comps = cal.dateComponents([.year], from: now)
             comps.month = idx + 1; comps.day = 1
             guard var start = cal.date(from: comps) else { return nil }

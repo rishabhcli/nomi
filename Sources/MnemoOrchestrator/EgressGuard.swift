@@ -13,7 +13,13 @@ public actor EgressGuard {
     public static func isLoopbackHost(_ host: String) -> Bool {
         let h = host.lowercased()
         if h == "localhost" || h == "::1" || h == "[::1]" { return true }
-        return h.hasPrefix("127.")   // entire 127.0.0.0/8 is loopback
+        // 127.0.0.0/8 — but only as a genuine dotted-quad. A bare
+        // hasPrefix("127.") waved through spoofed hosts like
+        // "127.0.0.1.evil.com" (resolves off-box) → the guard would not block
+        // egress to them. Require exactly four numeric octets starting with 127.
+        let octets = h.split(separator: ".", omittingEmptySubsequences: false)
+        guard octets.count == 4, octets[0] == "127" else { return false }
+        return octets.allSatisfy { Int($0).map { (0...255).contains($0) } ?? false }
     }
 
     public func beginQueryWindow() -> Window {

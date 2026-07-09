@@ -28,6 +28,10 @@ final class DebugHooks {
             ("ai.mnemo.debug.snapshot", { [weak self] in self?.snapshot() }),
             ("ai.mnemo.debug.orb", { [weak self] in self?.renderOrbStills() }),
             ("ai.mnemo.debug.cycle", { [weak self] in self?.cycleOpenClose() }),
+            ("ai.mnemo.debug.dictate", { [weak self] in self?.startDictation() }),
+            ("ai.mnemo.debug.stopdictate", { [weak self] in self?.controller.dictation.stop() }),
+            ("ai.mnemo.debug.fakelisten", { [weak self] in self?.fakeListen() }),
+            ("ai.mnemo.debug.stopfake", { [weak self] in self?.controller.dictation.isListening = false }),
         ]
         for (name, action) in actions {
             tokens.append(center.addObserver(forName: .init(name), object: nil, queue: .main) { _ in
@@ -51,6 +55,26 @@ final class DebugHooks {
     private func showTyping() {
         controller.summon()
         controller.vm.state.query = "Hello"
+    }
+
+    /// Drives the REAL on-device dictation path — the voice-drop UI and the
+    /// crash-fix regression check. Summons, then starts the mic; logs the
+    /// listening/problem state so a headless run can assert no force-quit.
+    private func startDictation() {
+        controller.summon()
+        controller.dictation.start()
+        let d = controller.dictation
+        try? "dictate-started listening=\(d.isListening) problem=\(d.problem ?? "nil")\n"
+            .appendToFile(atPath: "/tmp/mnemo-geometry.log")
+    }
+
+    /// Renders the voice "drop" (narrow pendant + orb) WITHOUT the mic, so the
+    /// listening UI can be verified headlessly where speech permission isn't
+    /// granted. Not a real capture — purely the drop geometry + orb shader.
+    private func fakeListen() {
+        controller.summon()
+        controller.dictation.amplitude = 0.55
+        controller.dictation.isListening = true
     }
 
     /// End-to-end query through the real orchestrator path (UI soak).

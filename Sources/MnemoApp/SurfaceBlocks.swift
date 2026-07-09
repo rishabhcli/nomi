@@ -1,92 +1,87 @@
 import SwiftUI
 import MnemoOrchestrator
 
-/// Content for the simplified notch surface (reference: assets/IMG_1149 +
-/// IMG_1150): the glass input band and the answer zone. Nothing else renders
-/// in the notch — the richer data stays in state for mnemoctl.
+/// Content for the notch surface (reference: Tests/Fixtures/reference): the
+/// Liquid-Glass tray and the answer zone. Nothing else renders in the notch —
+/// the richer data (reasoning, related, suggestions) stays in state for mnemoctl.
 
-// MARK: - Bottom input band (Liquid Glass strip; + / pill field / mic-or-send)
+// MARK: - Bottom glass tray (+ / pill field / mic-or-send / home indicator)
 
-struct InputBand: View {
+struct InputTray: View {
     @ObservedObject var vm: NotchViewModel
     @ObservedObject var dictation: Dictation
     @FocusState.Binding var focused: Bool
     let searching: Bool
     let reduceMotion: Bool
+    let showHandle: Bool
 
     private var hasText: Bool { !vm.state.query.isEmpty }
 
     var body: some View {
-        VStack(spacing: 0) {
-            // The black body fades INTO the glass, per the reference — the
-            // gradient lives above the controls, over the glass.
-            LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom)
-                .frame(height: Surface.bandFade)
-                .allowsHitTesting(false)
-            GlassEffectContainer {
-                HStack(spacing: 10) {
-                    circleButton(symbol: "plus", help: "New conversation (⌘K)") {
-                        vm.newConversation()
-                        focused = true
-                    }
-                    pill
-                    micOrSend
-                }
-                .padding(.horizontal, 14)
-            }
-            .frame(height: Surface.bandHeight)
-        }
-        .background {
-            // The band is the ONLY glassy part of the surface: the desktop
-            // shows through it, like the checkered region in the reference.
+        ZStack(alignment: .top) {
+            // The tray is the ONLY glassy part of the surface: dark, translucent
+            // Liquid Glass — the desktop shows through it. The outer NotchShape
+            // rounds its bottom corners. (Glass cannot sample glass: nothing
+            // else on the surface uses glassEffect.)
             Rectangle().fill(.clear)
-                .glassEffect(.regular.tint(.black.opacity(0.35)), in: Rectangle())
+                .glassEffect(.regular.tint(.black.opacity(Surface.trayTint)), in: Rectangle())
+            VStack(spacing: 0) {
+                // The black body melts INTO the glass here — a black→clear
+                // gradient OVER the glass, so there is never a desktop-showing
+                // gap between the body and the controls.
+                LinearGradient(colors: [.black, .black.opacity(0)], startPoint: .top, endPoint: .bottom)
+                    .frame(height: Surface.bandFade)
+                    .allowsHitTesting(false)
+                HStack(spacing: 10) {
+                    pill
+                    // The send/mic control is hidden while working, so a second
+                    // query can't be fired mid-flight — the tray collapses to
+                    // just the spinner.
+                    if !searching { micOrSend }
+                }
+                .padding(.horizontal, 13)
+                .frame(height: Surface.bandHeight)
+                if showHandle { HomeIndicator().frame(height: Surface.trayHandle) }
+            }
         }
     }
 
-    /// Dark translucent pill, light placeholder, white text — "Ask Siri" style.
+    /// Dark translucent pill: white text, light placeholder. While searching it
+    /// shows ONLY the spinner — no step/status text (kept out of the notch).
     private var pill: some View {
-        ZStack(alignment: .leading) {
-            Capsule().fill(.white.opacity(searching ? 0.04 : 0.07))
+        ZStack {
+            Capsule().fill(.white.opacity(0.10))
             if searching {
-                HStack(spacing: 10) {
-                    SixDotSpinner()
-                        .frame(width: Surface.spinnerRing + 4, height: Surface.spinnerRing + 4)
-                    Text(vm.state.status.isEmpty ? "Working…" : vm.state.status)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.55))
-                        .id(vm.state.status)
-                        .transition(.opacity)
-                }
-                .padding(.horizontal, 16)
-                .animation(Motion.dissolve, value: vm.state.status)
+                SixDotSpinner()
+                    .frame(width: Surface.spinnerRing + 6, height: Surface.spinnerRing + 6)
             } else {
                 TextField("Ask Mnemo", text: $vm.state.query)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 14))
+                    .font(.system(size: 15))
                     .foregroundStyle(.white)
                     .tint(.white)
                     .focused($focused)
                     .onSubmit { Task { await vm.submit() } }
                     .onKeyPress(.upArrow) { vm.recallPrevious(); return .handled }
                     .onKeyPress(.downArrow) { vm.recallNext(); return .handled }
-                    .onChange(of: dictation.transcript) { _, t in
-                        if !t.isEmpty { vm.state.query = t }
-                    }
+                    // transcript→query bridge lives on the always-mounted surface
+                    // (NotchSurfaceView) — it must survive the tray unmounting
+                    // while the listening drop is up.
                     .padding(.horizontal, 16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .onAppear { focused = true }
             }
         }
-        .frame(height: 38)
+        .frame(height: 40)
     }
 
-    /// Mic when empty; morphs to a white filled circle with a black ↑ when
-    /// text is present — exactly the reference's send morph.
+    /// Mic when empty; morphs to a white filled circle with a black ↑ when text
+    /// is present — the reference's send morph. Tapping the mic collapses the
+    /// surface into the listening drop (one voice UI everywhere).
     private var micOrSend: some View {
         Button {
             if dictation.isListening {
-                dictation.stop()
-                Task { await vm.submit() }
+                dictation.stop(); Task { await vm.submit() }
             } else if hasText {
                 Task { await vm.submit() }
             } else {
@@ -94,37 +89,35 @@ struct InputBand: View {
             }
         } label: {
             ZStack {
-                Circle().fill(hasText ? Color.white : Color.white.opacity(0.09))
+                Circle().fill(hasText ? Color.white : Color.white.opacity(0.13))
                 Image(systemName: hasText ? "arrow.up" : "mic.fill")
-                    .font(.system(size: 14, weight: hasText ? .bold : .regular))
+                    .font(.system(size: 15, weight: hasText ? .bold : .regular))
                     .foregroundStyle(hasText ? Color.black : Color.white)
                     .contentTransition(.symbolEffect(.replace))
             }
-            .frame(width: 36, height: 36)
+            .frame(width: 40, height: 40)
         }
         .buttonStyle(.plain)
         .animation(Motion.adaptive(Motion.glyph, reduceMotion: reduceMotion), value: hasText)
         .help(hasText ? "Send (⌘⏎)" : "Dictate")
         .accessibilityLabel(hasText ? "Send" : "Dictate")
     }
+}
 
-    private func circleButton(symbol: String, help: String,
-                              action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            ZStack {
-                Circle().fill(Color.white.opacity(0.09))
-                Image(systemName: symbol)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.white)
-            }
-            .frame(width: 36, height: 36)
-        }
-        .buttonStyle(.plain)
-        .help(help)
+/// The little grab-handle pill at the tray bottom (reference detail).
+struct HomeIndicator: View {
+    var body: some View {
+        Capsule()
+            .fill(.white.opacity(0.32))
+            .frame(width: Surface.homeIndicatorW, height: Surface.homeIndicatorH)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            .padding(.bottom, 4)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 }
 
-// MARK: - Answer zone (white text · one quiet chip row · outline thumbs)
+// MARK: - Answer zone (white text · one quiet chip row)
 
 struct AnswerZone: View {
     @ObservedObject var vm: NotchViewModel
@@ -132,7 +125,10 @@ struct AnswerZone: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            if let problem = dictation.problem {
+            // A dictation problem belongs to the input/dictation moment only —
+            // never stacked above an answer or terminal state, where it would
+            // read as a stale banner leaking into an unrelated result.
+            if let problem = dictation.problem, vm.state.answer.isEmpty, vm.state.terminal == nil {
                 Text(problem)
                     .font(.system(size: 13))
                     .foregroundStyle(.white.opacity(0.65))
@@ -142,17 +138,16 @@ struct AnswerZone: View {
             } else if !vm.state.answer.isEmpty {
                 answerText
                 sourceChips
-                thumbs
             }
         }
         .padding(.horizontal, 20)
-        .padding(.top, 14)
-        .padding(.bottom, 10)
+        .padding(.top, 16)
+        .padding(.bottom, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// Large clean white text, top-left — the scarecrow-joke look. Unsupported
-    /// sentences (M5) stay visually distinct.
+    /// Large clean white text, top-left. Unsupported sentences (M5) stay
+    /// visually distinct.
     private var answerText: some View {
         let sentences = Sentences.split(vm.state.answer)
         return VStack(alignment: .leading, spacing: 4) {
@@ -178,7 +173,7 @@ struct AnswerZone: View {
                     Button { reveal(card.path) } label: {
                         Text(card.title)
                             .font(.system(size: 12))
-                            .foregroundStyle(.white.opacity(0.65))
+                            .foregroundStyle(.white.opacity(0.7))
                             .lineLimit(1)
                             .padding(.horizontal, 12).padding(.vertical, 6)
                             .background(Capsule().fill(.white.opacity(0.12)))
@@ -188,23 +183,6 @@ struct AnswerZone: View {
                 }
             }
         }
-    }
-
-    /// Outline thumbs — up strengthens the cited memories, down just registers.
-    private var thumbs: some View {
-        HStack(spacing: 14) {
-            Button { vm.feedback(positive: true) } label: {
-                Image(systemName: vm.state.feedback == true ? "hand.thumbsup.fill" : "hand.thumbsup")
-            }
-            .accessibilityLabel("Good answer")
-            Button { vm.feedback(positive: false) } label: {
-                Image(systemName: vm.state.feedback == false ? "hand.thumbsdown.fill" : "hand.thumbsdown")
-            }
-            .accessibilityLabel("Bad answer")
-        }
-        .font(.system(size: 15, weight: .regular))
-        .foregroundStyle(.white)
-        .buttonStyle(.plain)
     }
 
     /// Terminal states stay minimal: the message plus one recovery action.
@@ -239,7 +217,7 @@ struct AnswerZone: View {
     }
 }
 
-// MARK: - 6-dot comet spinner (UI.md §8)
+// MARK: - 6-dot comet spinner
 
 struct SixDotSpinner: View {
     var body: some View {

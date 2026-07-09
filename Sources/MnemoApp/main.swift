@@ -2,10 +2,15 @@ import AppKit
 import MnemoCore
 
 func mnemoConfigText() -> String? {
-    let candidates = [
+    var candidates = [
         FileManager.default.currentDirectoryPath + "/mnemo.toml",
         NSHomeDirectory() + "/Documents/6767/mnemo.toml",
     ]
+    // A packaged .app ships its own config in Resources (launched via `open`,
+    // the cwd is `/`, so the cwd candidate won't hit).
+    if let bundled = Bundle.main.url(forResource: "mnemo", withExtension: "toml")?.path {
+        candidates.insert(bundled, at: 0)
+    }
     for c in candidates where FileManager.default.fileExists(atPath: c) {
         return try? String(contentsOfFile: c, encoding: .utf8)
     }
@@ -45,6 +50,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     init(config: MnemoConfig) { self.config = config }
 
     func applicationDidFinishLaunching(_ n: Notification) {
+        // Single-instance: a second launch must not leave another resident notch
+        // panel on screen. Each instance installs its own global hover monitor,
+        // so every running copy pops open on hover → stacked "Ask Mnemo"
+        // surfaces. Newest launch wins; terminate any older instance first.
+        let me = NSRunningApplication.current
+        for other in NSWorkspace.shared.runningApplications
+        where other != me && (other.bundleIdentifier == "ai.mnemo.app"
+                              || other.executableURL?.lastPathComponent == "MnemoApp") {
+            other.terminate()
+        }
         controller = NotchController(config: config)
         // No menu-bar item: the notch itself is the only affordance (UI.md §4).
 
@@ -57,16 +72,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hover.start()
 
         // Click-outside: the panel resigning key collapses the surface —
-        // unless the user is mid-dictation or an answer is streaming.
-        NotificationCenter.default.addObserver(
-            forName: NSWindow.didResignKeyNotification,
-            object: controller.panel, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self, let c = self.controller,
-                      c.vm.state.phase != .idle,
-                      c.vm.state.phase != .searching,
-                      !c.dictation.isListening else { return }
-                c.dismiss()
+        // unless the user is mid-dictation or an answer is streaming. Disabled
+        // under debug hooks so headless UI tests aren't collapsed when another
+        // app steals key focus.
+        if ProcessInfo.processInfo.environment["MNEMO_DEBUG_HOOKS"] != "1" {
+            NotificationCenter.default.addObserver(
+                forName: NSWindow.didResignKeyNotification,
+                object: controller.panel, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self, let c = self.controller,
+                          c.vm.state.phase != .idle,
+                          c.vm.state.phase != .searching,
+                          !c.dictation.isListening else { return }
+                    c.dismiss()
+                }
             }
         }
 

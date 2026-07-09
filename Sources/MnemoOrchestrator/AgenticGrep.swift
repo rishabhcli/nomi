@@ -183,7 +183,11 @@ public enum Subprocess {
         p.arguments = args
         let pipe = Pipe()
         p.standardOutput = pipe
-        p.standardError = Pipe()
+        // Discard stderr rather than pipe it: nothing reads a stderr Pipe here,
+        // so a child that writes >~64KB to stderr (e.g. `grep -rFn` emitting a
+        // permission-denied line per unreadable file over the mount) would block
+        // on the full pipe while we block on readDataToEndOfFile(stdout) → hang.
+        p.standardError = FileHandle.nullDevice
         try p.run()
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         p.waitUntilExit()

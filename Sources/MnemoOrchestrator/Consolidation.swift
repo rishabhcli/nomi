@@ -109,10 +109,15 @@ public struct Consolidator: Sendable {
         }
 
         // 2. Pattern synthesis over clusters of related dynamic memories.
+        //    Idempotent: skip a synthesis whose text already exists as a memory,
+        //    so repeated dream passes don't accrete duplicate consolidations
+        //    (the synthesized fact is itself dynamic and would re-cluster).
+        var existingNorm = Set(live.map { ProfileDedupe.normalize($0.memory) })
         for cluster in Cluster.byKeyword(live.filter { !$0.isStatic }) where cluster.count >= 3 {
-            if let synth = await synthesizer.synthesize(cluster) {
-                _ = try await store.createMemory(content: synth, isStatic: false, forgetAfter: nil, container: container)
-            }
+            guard let synth = await synthesizer.synthesize(cluster) else { continue }
+            let norm = ProfileDedupe.normalize(synth)
+            guard !norm.isEmpty, existingNorm.insert(norm).inserted else { continue }
+            _ = try await store.createMemory(content: synth, isStatic: false, forgetAfter: nil, container: container)
         }
 
         // 3. Cold-archive: neglected memories self-archive (retained in store).

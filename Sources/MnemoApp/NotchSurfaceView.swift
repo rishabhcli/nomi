@@ -1,15 +1,17 @@
 import SwiftUI
 import MnemoOrchestrator
 
-/// The notch surface (UI.md §0/§3, reference: assets/IMG_1149 + IMG_1150):
-/// a solid-black extension of the hardware notch — square top corners flush
-/// with the screen top, rounded bottom corners — with a translucent Liquid
-/// Glass input band curving around the bottom edge. Idle it IS the notch;
-/// expanded it is the notch grown larger.
+/// The notch surface (reference: Tests/Fixtures/reference) as ONE cohesive
+/// object: a pure-black body that continues the hardware notch, with a
+/// translucent Liquid-Glass tray curving around the bottom (the desktop shows
+/// through it) that holds the controls and the home-indicator. Voice is a
+/// narrow "drop" that grows straight DOWN from the notch with the reactive orb
+/// inside — it never widens the notch.
 ///
-/// Glitch-free rules (UI.md §4): the panel never moves; ALL geometry lives in
-/// one `SurfaceGeometry` value animated by ONE `.animation` modifier — no
-/// stacked springs, no measurement feedback loops, no glass on the surface.
+/// Glitch-free rules: the panel never moves; ALL geometry lives in ONE
+/// `SurfaceGeometry` value driven by exactly ONE `.animation` modifier. No
+/// stacked springs, no separate opacity/clip animations on nested pieces, no
+/// desktop-showing gap between the body and the controls.
 struct NotchSurfaceView: View {
     @ObservedObject var vm: NotchViewModel
     @ObservedObject var dictation: Dictation
@@ -22,6 +24,14 @@ struct NotchSurfaceView: View {
 
     private var phase: NotchPhase { vm.state.phase }
     private var listening: Bool { dictation.isListening }
+    /// The glass tray shows in every expanded state except the listening drop.
+    private var showsTray: Bool { phase != .idle && !listening }
+    /// The pull-handle appears ONLY when there is a real conversation that
+    /// overflows the cap — i.e. there is more to scroll to. Never in the empty
+    /// input or the working/searching state.
+    private var showsHandle: Bool {
+        (phase == .answering || phase == .state) && answerHeight > Surface.answerCap
+    }
 
     /// One value drives width + height + radius so exactly one spring runs.
     private var geometry: SurfaceGeometry {
@@ -29,28 +39,27 @@ struct NotchSurfaceView: View {
                         notch: notchSize, answerHeight: answerHeight)
     }
 
-    private var spring: Animation {
-        switch phase {
-        case .idle: Motion.collapse
-        default: Motion.grow
-        }
-    }
+    private var spring: Animation { phase == .idle ? Motion.collapse : Motion.grow }
 
     var body: some View {
-        surface
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        surface.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     private var surface: some View {
         let geo = geometry
-        return VStack(spacing: 0) {
-            blackZone
-            InputBand(vm: vm, dictation: dictation, focused: $focused,
-                      searching: phase == .searching, reduceMotion: reduceMotion)
-                .frame(height: phase == .idle ? 0 : Surface.bandFade + Surface.bandHeight)
-                .clipped()
-                .opacity(phase == .idle ? 0 : 1)
-                .allowsHitTesting(phase != .idle)
+        return ZStack(alignment: .top) {
+            base(geo)
+            content
+                .padding(.top, notchSize.height)                 // clears the hardware notch
+                .padding(.bottom, showsTray ? Surface.trayHeight : 0)
+            if showsTray {
+                InputTray(vm: vm, dictation: dictation, focused: $focused,
+                          searching: phase == .searching, reduceMotion: reduceMotion,
+                          showHandle: showsHandle)
+                    .frame(height: Surface.trayHeight)
+                    .frame(maxHeight: .infinity, alignment: .bottom)
+                    .transition(.opacity)
+            }
         }
         .frame(width: geo.width, height: geo.height, alignment: .top)
         .clipShape(NotchShape(bottomCornerRadius: geo.radius))
@@ -58,42 +67,70 @@ struct NotchSurfaceView: View {
                 radius: Surface.shadowRadius, y: Surface.shadowY)
         .overlay(alignment: .bottomLeading) { privacyDot }
         .animation(Motion.adaptive(spring, reduceMotion: reduceMotion), value: geo)
-        .background(shortcuts)
-        .onExitCommand { NSApp.sendAction(#selector(AppDelegate.dismissNotch), to: nil, from: nil) }
-        .onChange(of: phase) { _, p in
-            if p == .input || p == .answering { focused = true }
-        }
-    }
-
-    /// The solid-black body: pure #000 continuing the hardware notch. Content
-    /// (answer / orb) lives top-aligned inside it; a gradient at its bottom
-    /// bridges into the glass band exactly like the reference.
-    private var blackZone: some View {
-        ZStack(alignment: .top) {
-            Color.black
-            Group {
-                if listening {
-                    VoiceOrbView(amplitude: dictation.amplitude)
-                        .padding(.top, 10)
-                        .transition(Motion.blurMorph(reduceMotion: reduceMotion))
-                } else if phase == .answering || phase == .state {
-                    answerZone
-                        .transition(Motion.blurMorph(reduceMotion: reduceMotion))
-                }
-            }
-            .padding(.top, notchSize.height)   // content starts below the hardware notch
-        }
-        .frame(maxHeight: .infinity)
         .contentShape(Rectangle())
         .gesture(holdToDictate)
-        .onTapGesture { if phase == .idle { vm.summon() } }
-        .animation(Motion.adaptive(Motion.dissolve, reduceMotion: reduceMotion), value: listening)
+        .onTapGesture {
+            // Tapping the listening drop stops + submits; tapping the idle
+            // notch summons.
+            if dictation.isListening {
+                dictation.stop()
+                if !vm.state.query.isEmpty { Task { await vm.submit() } }
+            } else if phase == .idle {
+                vm.summon()
+            }
+        }
+        .background(shortcuts)
+        .onExitCommand { NSApp.sendAction(#selector(AppDelegate.dismissNotch), to: nil, from: nil) }
+        .onChange(of: phase) { _, p in if p == .input || p == .answering { focused = true } }
+        // The transcript→query bridge lives on the ALWAYS-mounted surface — the
+        // tray (which used to hold it) is unmounted during the listening drop,
+        // so binding it here is what lets a dictated phrase reach submit.
+        .onChange(of: dictation.transcript) { _, t in if !t.isEmpty { vm.state.query = t } }
+        // A dictation failure (denied permission, no model, no mic) has no body
+        // space of its own in the input/drop states — surface it as a visible
+        // message instead of failing silently.
+        .onChange(of: dictation.problem) { _, p in
+            guard let p, !p.isEmpty else { return }
+            vm.presentInfo(p)
+            dictation.problem = nil
+        }
+        .accessibilityElement(children: .contain)
         .accessibilityLabel("Mnemo")
         .accessibilityHint("Ask, or hold to dictate")
     }
 
-    /// Answer area per the reference: white text, one quiet source chip row,
-    /// outline thumbs. Nothing else. Scrolls only past the cap.
+    /// The body is opaque #000 (indistinguishable from the hardware notch). The
+    /// tray region is left CLEAR so the tray's Liquid Glass samples the desktop
+    /// — that is what makes the bottom translucent like the reference. Idle and
+    /// the listening drop are fully black.
+    @ViewBuilder private func base(_ geo: SurfaceGeometry) -> some View {
+        if showsTray {
+            VStack(spacing: 0) {
+                Rectangle().fill(.black)
+                Color.clear.frame(height: Surface.trayHeight)
+            }
+        } else {
+            Rectangle().fill(.black)
+        }
+    }
+
+    /// The one piece of content that lives in the black body: the answer, or
+    /// the listening orb. Input/searching have nothing here — their field and
+    /// spinner live in the tray. Swaps ride the shared spring via a blur-morph.
+    @ViewBuilder private var content: some View {
+        if listening {
+            VoiceOrbView(amplitude: dictation.amplitude)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .transition(Motion.blurMorph(reduceMotion: reduceMotion))
+        } else if phase == .answering || phase == .state {
+            answerZone
+                .frame(maxWidth: .infinity, alignment: .top)
+                .transition(Motion.blurMorph(reduceMotion: reduceMotion))
+        }
+    }
+
+    /// Answer area (reference): white text, one quiet source chip row, outline
+    /// thumbs. Scrolls only past the cap.
     private var answerZone: some View {
         ScrollView(.vertical, showsIndicators: false) {
             AnswerZone(vm: vm, dictation: dictation)
@@ -103,19 +140,19 @@ struct NotchSurfaceView: View {
         .scrollBounceBehavior(.basedOnSize)
     }
 
-    /// Privacy folded into a tiny dot (UI.md §8): green = 0 egress.
+    /// Privacy folded into a tiny dot: green = 0 egress.
     @ViewBuilder private var privacyDot: some View {
         if phase != .idle {
             Circle()
-                .fill(vm.privacy == .clean ? Color.green.opacity(0.8) : Color.orange)
+                .fill(vm.privacy == .clean ? Color.green.opacity(0.85) : Color.orange)
                 .frame(width: 4, height: 4)
-                .padding(.leading, 12).padding(.bottom, 10)
+                .padding(.leading, 13).padding(.bottom, 11)
                 .help(vm.privacy == .clean ? "On-device · 0 egress" : "Egress blocked — see log")
                 .accessibilityLabel("Privacy status")
         }
     }
 
-    /// UI.md §12: press-hold the black surface is push-to-talk; release submits.
+    /// Press-hold the surface is push-to-talk; release submits.
     private var holdToDictate: some Gesture {
         LongPressGesture(minimumDuration: 0.35)
             .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .local))
@@ -144,9 +181,9 @@ struct NotchSurfaceView: View {
     }
 }
 
-/// The one animated value: width, height, and bottom radius per phase.
-/// Explicit sizes — no layout measurement feeds back into the spring except
-/// the answer zone's capped height.
+/// The one animated value: width, height, and bottom radius per state. Explicit
+/// targets — no per-frame layout feedback except the answer zone's capped
+/// height, which grows the read surface as the answer streams.
 struct SurfaceGeometry: Equatable {
     let width: CGFloat
     let height: CGFloat
@@ -155,9 +192,11 @@ struct SurfaceGeometry: Equatable {
     init(phase: NotchPhase, listening: Bool, notch: CGSize, answerHeight: CGFloat) {
         let notchH = max(notch.height, 24)
         if listening {
-            width = Surface.inputWidth
-            height = notchH + Surface.orbZoneHeight + Surface.bandHeight
-            radius = Surface.bottomRadius
+            // The drop: notch-width (never wider), grows down, semicircle bottom.
+            let w = max(notch.width, Surface.dropWidth)
+            width = w
+            height = notchH + Surface.dropBody
+            radius = w / 2
             return
         }
         switch phase {
@@ -167,12 +206,12 @@ struct SurfaceGeometry: Equatable {
             radius = Surface.idleRadius
         case .input, .searching:
             width = Surface.inputWidth
-            height = notchH + 10 + Surface.bandHeight
+            height = notchH + Surface.trayHeight
             radius = Surface.bottomRadius
         case .answering, .state:
             width = Surface.readWidth
-            let zone = min(max(answerHeight, 60), Surface.answerCap)
-            height = notchH + zone + 14 + Surface.bandHeight
+            let zone = min(max(answerHeight, 48), Surface.answerCap)
+            height = notchH + zone + 12 + Surface.trayHeight
             radius = Surface.bottomRadius
         }
     }

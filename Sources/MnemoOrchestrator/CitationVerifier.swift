@@ -38,7 +38,10 @@ public enum Verification {
     /// footnote — `[source: X — /p @1-2]`, `【…】`, and `[title]` all go.
     public static func stripCitations(_ s: String) -> String {
         var out = s
-        for (open, close): (Character, Character) in [("[", "]"), ("【", "】"), ("(", ")")] {
+        // Only citation markup — NOT round brackets. Parentheses hold real claim
+        // content ("(down from 842)"); stripping them left claims unverified, and
+        // an unmatched "(" nuked the whole sentence tail → false unsupported flags.
+        for (open, close): (Character, Character) in [("[", "]"), ("【", "】")] {
             var result = ""
             var depth = 0
             for ch in out {

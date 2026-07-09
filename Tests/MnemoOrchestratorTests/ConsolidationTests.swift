@@ -125,4 +125,23 @@ final class ConsolidatorTests: XCTestCase {
         let forgotten = await store.forgotten
         XCTAssertTrue(forgotten.contains("cold"))
     }
+
+    // Regression: repeated dream passes must not accrete duplicate syntheses.
+    func testDreamDoesNotDuplicateExistingSynthesis() async throws {
+        let path = tempPath(); defer { try? FileManager.default.removeItem(atPath: path) }
+        let synth = "The user standardizes on Bazel across all projects."
+        let store = DreamFakeStore([
+            dmem("m1", "I use Bazel for the renderer."),
+            dmem("m2", "I use Bazel for the server."),
+            dmem("m3", "I migrated the mobile app to Bazel."),
+            dmem("m4", synth),   // a prior dream pass already synthesized this
+        ])
+        let c = Consolidator(store: store, ledger: StrengthLedger(path: path), container: "mnemo",
+                             synthesizer: StubSynthesizer(output: synth),
+                             coldThresholdDays: 30, promoteMinAssertions: 99)
+        try await c.dream(now: Date())
+        let created = await store.created
+        XCTAssertFalse(created.contains { ProfileDedupe.normalize($0.content) == ProfileDedupe.normalize(synth) },
+                       "a synthesis identical to an existing memory must not be re-created (idempotent dreaming)")
+    }
 }

@@ -53,6 +53,12 @@ final class TimeWindowTests: XCTestCase {
         XCTAssertNotNil(TimeWindow.parse(query: "notes from last week", now: now))
         XCTAssertNotNil(TimeWindow.parse(query: "anything last month", now: now))
         XCTAssertNil(TimeWindow.parse(query: "what is my build tool", now: now))
+        // Regression: "may"/"maybe" as modal verbs must not become a May window;
+        // "in May" (temporal cue) and other bare months still parse.
+        XCTAssertNil(TimeWindow.parse(query: "the release may slip next sprint", now: now))
+        XCTAssertNil(TimeWindow.parse(query: "maybe I should refactor", now: now))
+        XCTAssertNotNil(TimeWindow.parse(query: "what did I decide in May", now: now))
+        XCTAssertNotNil(TimeWindow.parse(query: "notes from March", now: now))
     }
     func testYesterdayIntervalContainsYesterdayNotToday() {
         let w = TimeWindow.parse(query: "yesterday", now: now)!

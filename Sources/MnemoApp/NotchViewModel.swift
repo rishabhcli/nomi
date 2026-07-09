@@ -31,6 +31,12 @@ final class NotchViewModel: ObservableObject {
     private var lastQuery = ""
     private var tone: ResponseTone
 
+    /// True while a query is streaming. Used to lock out re-summon and
+    /// mouse-leave dismissal so a hover-out/in during an in-flight answer can't
+    /// tear down and re-open the surface as a duplicate session.
+    private var runningQueries = 0
+    var isQuerying: Bool { runningQueries > 0 }
+
     init(defaultContainer: String = "mnemo",
          tone: ResponseTone = .balanced,
          makeService: @escaping (String, ResponseTone) -> QueryServing,
@@ -48,6 +54,10 @@ final class NotchViewModel: ObservableObject {
     // MARK: - Session lifecycle
 
     func summon() {
+        // Single chokepoint for every summon path (hover, hotkey, tap): never
+        // open a fresh session while a query is still streaming, else a stray
+        // summon spawns a duplicate over the in-flight answer.
+        guard !isQuerying else { return }
         state = NotchState(phase: .input, query: "", answer: "", sources: [])
         refreshPrivacy()
         // Proactive digest (beats-Siri #5): surface what changed, quietly, as
@@ -71,6 +81,10 @@ final class NotchViewModel: ObservableObject {
     func submit() async {
         let raw = state.query
         guard !raw.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        // A query is already in flight — drop repeat submits so a second message
+        // can't be fired while the first is still working (the surface stays in
+        // its working/searching state until the answer arrives).
+        guard state.phase != .searching else { return }
         switch CommandParser.parse(raw) {
         case .command(let command): await handle(command)
         case .query(let q):
@@ -157,6 +171,9 @@ final class NotchViewModel: ObservableObject {
         state.phase = .searching
         state.status = "Searching your memory…"
 
+        runningQueries += 1
+        defer { runningQueries -= 1 }
+
         let token = await scheduler?.beginInteractive()
         defer { if let token { Task { await scheduler?.endInteractive(token) } } }
 
@@ -213,6 +230,11 @@ final class NotchViewModel: ObservableObject {
     }
 
     // MARK: - Helpers
+
+    /// Surface an informational message (e.g. a dictation error) in the notch —
+    /// the input/listening states have no body space of their own, so route it
+    /// through the answer block where it is actually visible.
+    func presentInfo(_ text: String) { showInfo(text) }
 
     /// Render arbitrary informational text as if it were an answer block.
     private func showInfo(_ text: String) {

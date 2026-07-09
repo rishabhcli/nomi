@@ -122,7 +122,10 @@ final class NotchController {
     }
 
     func summon() {
-        guard vm.state.phase == .idle else { return }
+        // Only from a truly idle surface: never while a query is still
+        // streaming (phase can be .answering mid-stream), or a hover-out/in
+        // spawns a duplicate session on top of the in-flight one.
+        guard vm.state.phase == .idle, !vm.isQuerying else { return }
         vm.summon()
         panel.makeKeyAndOrderFront(nil)   // caret live immediately
     }
@@ -141,11 +144,14 @@ final class NotchController {
     /// idle, dictating, or streaming — those must not auto-close.
     var mouseOutHotRect: CGRect? {
         let phase = vm.state.phase
-        guard phase != .idle, phase != .searching, !dictation.isListening else { return nil }
+        // Also nil while a query streams (phase is .answering mid-stream): a
+        // mouse-out must not tear down an in-flight answer, and leaving no idle
+        // state to re-summon from is what stops the duplicate-session bug.
+        guard phase != .idle, phase != .searching, !dictation.isListening, !vm.isQuerying else { return nil }
         let width = (phase == .input ? Surface.inputWidth : Surface.readWidth) + 140
         let bodyHeight: CGFloat = phase == .input
-            ? 10 + Surface.bandHeight
-            : Surface.answerCap + 14 + Surface.bandHeight
+            ? Surface.trayHeight
+            : Surface.answerCap + 12 + Surface.trayHeight
         let h = notchRect.height + bodyHeight + 90
         return CGRect(x: notchRect.midX - width / 2, y: screenFrame.maxY - h, width: width, height: h)
     }
