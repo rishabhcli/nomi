@@ -1,0 +1,124 @@
+import XCTest
+@testable import MnemoOrchestrator
+
+/// Scriptable grep surface: canned hits per query.
+struct FakeGrepSurface: GrepSurface {
+    let semanticHits: [String: [GrepHit]]
+    let literalHits: [String: [GrepHit]]
+    func semantic(_ query: String, scope: String?) async throws -> [GrepHit] {
+        semanticHits[query] ?? []
+    }
+    func literal(_ term: String, scope: String?) async throws -> [GrepHit] {
+        literalHits[term] ?? []
+    }
+}
+
+/// Scriptable planner: pops decisions off a list.
+actor ScriptedPlanner: HopPlanning {
+    var decisions: [HopDecision]
+    init(_ d: [HopDecision]) { decisions = d }
+    func nextHop(question: String, evidence: [Retrieved], hops: [HopTrace]) async -> HopDecision {
+        decisions.isEmpty ? .stop(rationale: "script exhausted") : decisions.removeFirst()
+    }
+}
+
+private func hit(_ path: String, _ snippet: String) -> GrepHit {
+    GrepHit(path: path, lineStart: 1, lineEnd: 2, snippet: snippet)
+}
+
+final class AgenticGrepTests: XCTestCase {
+    func testMultiHopVisitsBothDocuments() async throws {
+        // AT-M3.4 shape: hop 1 lands on doc A; the planner follows the thread
+        // to doc B; evidence covers both; the trace records the visit order.
+        let surface = FakeGrepSurface(
+            semanticHits: [
+                "how does the decision differ from the constraint?":
+                    [hit("/notes/decision-a.md", "We chose PostgreSQL for the telemetry store.")],
+                "ops platform backup constraint":
+                    [hit("/notes/constraint-b.md", "Managed backups only support MySQL-compatible engines.")],
+            ],
+            literalHits: [:])
+        let planner = ScriptedPlanner([
+            .semantic("ops platform backup constraint", rationale: "decision found; now find the constraint"),
+            .stop(rationale: "both sides covered"),
+        ])
+        let agentic = AgenticGrep(surface: surface, planner: planner, maxHops: 6)
+        let result = try await agentic.run("how does the decision differ from the constraint?", scope: nil)
+        let paths = Set(result.evidence.map(\.source.path))
+        XCTAssertEqual(paths, ["/notes/decision-a.md", "/notes/constraint-b.md"])
+        XCTAssertEqual(result.hops.count, 2)
+        XCTAssertEqual(result.hops[0].kind, "semantic")
+        XCTAssertTrue(result.hops[1].rationale.contains("constraint"))
+    }
+
+    func testMaxHopsBoundsTheLoop() async throws {
+        let surface = FakeGrepSurface(
+            semanticHits: ["q": [hit("/a.md", "x")], "again": [hit("/b.md", "y")]],
+            literalHits: [:])
+        let planner = ScriptedPlanner(Array(repeating: .semantic("again", rationale: "loop"), count: 50))
+        let agentic = AgenticGrep(surface: surface, planner: planner, maxHops: 3)
+        let result = try await agentic.run("q", scope: nil)
+        XCTAssertEqual(result.hops.count, 3, "hard cap, planner wanted 50")
+    }
+
+    func testLiteralHopUsesGrepF() async throws {
+        let surface = FakeGrepSurface(
+            semanticHits: ["q": []],
+            literalHits: ["ERR-4711": [hit("/logs/build.log", "ERR-4711: cache poisoned")]])
+        let planner = ScriptedPlanner([
+            .literal("ERR-4711", rationale: "lexical token — exact match"),
+            .stop(rationale: "found"),
+        ])
+        let agentic = AgenticGrep(surface: surface, planner: planner, maxHops: 6)
+        let result = try await agentic.run("q", scope: nil)
+        XCTAssertEqual(result.evidence.map(\.source.path), ["/logs/build.log"])
+        XCTAssertEqual(result.hops[1].kind, "literal")
+    }
+
+    func testEvidenceDeduplicatesRepeatedHits() async throws {
+        let surface = FakeGrepSurface(
+            semanticHits: ["q": [hit("/a.md", "same snippet")],
+                           "next": [hit("/a.md", "same snippet")]],
+            literalHits: [:])
+        let planner = ScriptedPlanner([
+            .semantic("next", rationale: "retry"),
+            .stop(rationale: "done"),
+        ])
+        let agentic = AgenticGrep(surface: surface, planner: planner, maxHops: 6)
+        let result = try await agentic.run("q", scope: nil)
+        XCTAssertEqual(result.evidence.count, 1)
+    }
+}
+
+final class SMFSGrepParseTests: XCTestCase {
+    func testParsesSMFSGrepOutput() {
+        let out = """
+        # supermemory semantic search — 3 results for "kickoff"
+        # searches by meaning across files in this container. usage:
+        #   grep "natural language query"          search all files
+        # output: <filepath>:<line_start>-<line_end>:<chunk>
+
+        /notes/meeting.md:12-14:The Orion project kickoff was moved to September 14.
+
+        (unknown):User used CMake for four years on the Horizon renderer project.
+        """
+        let hits = SMFSGrep.parseSemanticOutput(out)
+        XCTAssertEqual(hits.count, 2)
+        XCTAssertEqual(hits[0], GrepHit(path: "/notes/meeting.md", lineStart: 12, lineEnd: 14,
+                                        snippet: "The Orion project kickoff was moved to September 14."))
+        XCTAssertEqual(hits[1].path, "")   // (unknown) → no file path, snippet retained
+        XCTAssertTrue(hits[1].snippet.contains("CMake"))
+    }
+
+    func testParsesLiteralGrepOutput() {
+        let out = """
+        /Users/x/Mnemo/memory/fixture.md:2:My favorite build tool is Bazel and I switched to it in March 2025.
+        /Users/x/Mnemo/memory/other.md:7:Bazel remote caching notes
+        """
+        let hits = SMFSGrep.parseLiteralOutput(out, mountRoot: "/Users/x/Mnemo/memory")
+        XCTAssertEqual(hits.count, 2)
+        XCTAssertEqual(hits[0].path, "/fixture.md")
+        XCTAssertEqual(hits[0].lineStart, 2)
+        XCTAssertTrue(hits[1].snippet.contains("remote caching"))
+    }
+}

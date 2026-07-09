@@ -1,0 +1,106 @@
+#id	category	type	input	expect	forbid	timeout
+a01	fixture-lookup	ask	What is my favorite build tool?	bazel	-	180
+a02	fixture-lookup	ask	When did I switch to Bazel?	march 2025	-	180
+a03	fixture-lookup	ask	What build system did I use before Bazel?	cmake	-	180
+a04	fixture-lookup	ask	Which project did I use CMake on?	horizon	-	180
+a05	fixture-lookup	ask	How often does the staging database password rotate?	45	-	180
+a06	fixture-lookup	ask	When was the Orion project kickoff moved to?	september 14	-	180
+a07	fixture-lookup	ask	What was the search latency target tightened to?	250	-	180
+a08	fixture-lookup	ask	What is the conference badge pickup code?	seven three nine two|7392|7\W*3\W*9\W*2	-	180
+a09	fixture-lookup	ask	What is the uploaded secret number?	8842	-	180
+a10	fixture-lookup	ask	Why did I switch build tools?	hermetic|caching	-	180
+b01	timeline-numeric	ask	When was the Aurora migration originally scheduled to start?	may 5	-	180
+b02	timeline-numeric	ask	How many weeks did the Aurora migration slip?	four weeks|4 weeks	-	180
+b03	timeline-numeric	ask	What is the timeline of the Aurora migration?	(?s)may 5.*may 19.*june 2	-	180
+b04	timeline-numeric	ask	What cleared sign-off on May 30 for the Aurora migration?	load.test|sign.off	-	180
+b05	timeline-numeric	ask	Why did the Aurora migration slip?	load.test|environment|schema freeze	-	180
+b06	timeline-numeric	ask	How many days passed between the planned and actual Aurora start?	28 days|4 week|four week	-	180
+b07	timeline-numeric	ask	How long did the Aurora migration slip in weeks?	\[reasoning\].*computed a figure	-	180
+b08	timeline-numeric	ask	What lesson did the retro capture about the Aurora migration?	environment readiness	-	180
+c01	job-finder	ask	What university am I an incoming freshman at?	uiuc|illinois	-	180
+c02	job-finder	ask	How many rows were kept after the LinkedIn leads prune?	47	-	180
+c03	job-finder	ask	How many rows existed before the LinkedIn leads prune?	421	-	180
+c04	job-finder	ask	How many job applications have actually been verified as submitted?	0|zero|none|not.*submitted	-	180
+c05	job-finder	ask	What is the status of Chrome control in my job search?	paused	-	180
+c06	job-finder	ask	What is the filename of my resume?	bansal	-	180
+c07	job-finder	ask	What email am I using for job applications?	rishabh\.rb@icloud\.com	-	180
+c08	job-finder	ask	Where am I located according to my application profile?	fremont	-	180
+c09	job-finder	ask	What kind of summer roles am I targeting?	remote|internship|software	-	180
+c10	job-finder	ask	When were the stale active jobs archived?	2026-05-20|may 20	-	180
+c11	job-finder	ask	How many action-time checklist rows are there?	50	-	180
+c12	job-finder	ask	What does the submission gate collect?	confirmation	-	180
+d01	rustchain	ask	How much RTC is the attestation replay bounty worth?	200	-	180
+d02	rustchain	ask	What vulnerability was analyzed in RustChain?	attestation replay	-	180
+d03	rustchain	ask	What does BCOS stand for?	beacon certified open source	-	180
+d04	rustchain	ask	Who runs the BCOS certification program?	elyan	-	180
+d05	rustchain	ask	What does the /rtc-balance command return?	balance	-	180
+d06	rustchain	ask	Which branch was the attestation replay analysis done on?	kuanglaodi2|attestation-replay	-	180
+e01	kinora	ask	What is Kinora?	film|book|pdf	-	180
+e02	kinora	ask	How do I install the Kinora Python SDK?	pip install kinora	-	180
+e03	kinora	ask	What does a failed Kinora API request return?	error|envelope|json	-	180
+e04	kinora	ask	What is the canon engine design about?	bitemporal|knowledge.graph	-	180
+e05	kinora	ask	How many AI agents share the Kinora canon?	six|6	-	180
+e06	kinora	ask	What is the north star of the Kinora reading room?	film|scroll	-	180
+f01	machine-docs	ask	What printer is configured on my Mac?	brother|hl-2270dw	-	180
+f02	machine-docs	ask	What is the printer queue name on my Mac?	brother_hl_2270dw_series	-	180
+f03	machine-docs	ask	Which machine is the Sequoia rebuild dossier for?	m3-max	-	180
+f04	machine-docs	ask	When was the Sequoia rebuild dossier generated?	april 16|2026-04-16	-	180
+g01	synthesis	ask	Summarize the current state of my job search.	(?s)job--.*job--	-	180
+g02	synthesis	ask	What do my notes say about the Aurora migration and what printer do I have?	(?s)(aurora.*brother|brother.*aurora)	-	180
+g03	synthesis	ask	How do my job search notes and my application profile relate?	\[answer\]	\[error\]	180
+g04	synthesis	ask	What security research have I done?	attestation|replay|rustchain	-	180
+g05	synthesis	ask	What machine setup documentation do I keep?	dossier|printer|rebuild|sequoia	-	180
+g06	synthesis	ask	What happened in my job search in May 2026?	prune|archive|reset|research|leads	-	180
+h01	media	ask	Which document mentions the staging database password rotation?	fixture-image	-	180
+h02	media	ask	Which file says the Orion kickoff moved?	fixture-scanned	-	180
+h03	media	ask	Where is the search latency target written down?	fixture-doc	-	180
+h04	media	ask	Which recording mentions the badge pickup code?	fixture-memo	-	180
+i01	commands	cli	entity Aurora	aurora	nothing known	60
+i02	commands	cli	entity RustChain	attestation|bounty|rustchain	nothing known	60
+i03	commands	cli	preferences	bazel|reference|about you	-	60
+i04	commands	cli	digest	since last time|quiet	-	60
+i05	commands	cli	containers	mnemo	-	60
+i06	commands	cli	processing	.	error	60
+i07	commands	cli	inspect show	.	error	60
+i08	commands	cli	sync self-heal	orphans healed	-	120
+i09	commands	cli	audit	loopback|ok	fail	60
+i10	commands	cli	memory list	.	error	60
+j01	conversation	then	What is my favorite build tool?||When did I switch to it?	(?s)\[turn2\].*march 2025	-	240
+j02	conversation	then	When did the Aurora migration actually start?||Why was it delayed?	(?s)\[turn2\].*(load.test|environment|schema|not ready)	-	240
+j03	conversation	then	What is Kinora?||How do I install its Python SDK?	(?s)\[turn2\].*pip install	-	240
+j04	conversation	then	How many rows were kept after the LinkedIn prune?||And how many were there before?	(?s)\[turn2\].*421	-	240
+j05	conversation	then	What is my resume file called?||What email do I use with it?	(?s)\[turn2\].*rishabh\.rb@icloud\.com	-	240
+j06	conversation	then	What is the Aurora migration timeline?||How many weeks did it slip?	(?s)\[turn2\].*(four|4)	-	240
+k01	meta-confidence	ask	How confident are you about the Aurora timeline?	confident|sure	-	180
+k02	meta-confidence	verify	What is my favorite build tool?	bazel	UNSUPPORTED	300
+k03	meta-confidence	verify	How many weeks did the Aurora migration slip?	four|4	UNSUPPORTED	300
+k04	meta-confidence	verify	What is my blood type?	don't|couldn't|no |\[state\]	blood type is (a|b|ab|o)\b	300
+k05	meta-confidence	verify	When was the Orion kickoff moved to?	september	UNSUPPORTED	300
+l01	robustness	ask	hello	hi|hello|hey|help|ask	\[error\]	180
+l02	robustness	ask	thanks!	welcome|glad|anytime|help|no problem	\[error\]	180
+l03	robustness	ask	xyzzy plugh quux frobnicate	\[state\]|don't|couldn't|no relevant|nothing	-	180
+l04	robustness	ask	What is my blood type?	don't|couldn't|no |\[state\]|not.*(know|have|find)	blood type is (a|b|ab|o)\b	180
+l05	robustness	ask	What will the weather be tomorrow?	don't|can't|couldn't|not|\[state\]	sunny|rain expected|degrees	180
+l06	robustness	ask	?	\[done\]|\[state\]	\[error\]	180
+l07	robustness	ask	What does 🚀 mean in my notes?	\[done\]|\[state\]	\[error\]	180
+l08	robustness	ask	Tell me absolutely everything you know about every single topic in all of my files and notes and documents including every project every date every person every number and every decision ever recorded anywhere in my entire corpus of knowledge	\[done\]|\[state\]	\[error\]	180
+m01	cache	cache	What is my favorite build tool?	bazel	-	240
+m02	consistency	ask	What is my favorite build tool?	bazel	-	180
+m03	consistency	ask	How many weeks did the Aurora migration slip?	four|4	-	180
+m04	consistency	ask	WHAT IS MY FAVORITE BUILD TOOL?	bazel	-	180
+n01	time-aware	ask	What happened in my job search in May?	prune|archive|reset|research|leads|applications	-	180
+n02	time-aware	ask	What did I add to my notes recently?	\[answer\]	\[error\]	180
+n03	time-aware	ask	What changed in my notes yesterday?	\[done\]|\[state\]	\[error\]	180
+p01	search-quality	ask	What do the pyparsing best practices say about planning?	ambiguous|parser|grammar|target language	-	180
+p02	search-quality	ask	How do I extend the debugger according to my notes?	sys\.path|namespace|pythonpath	-	180
+p03	search-quality	ask	What error type does the Kinora error envelope example show?	book_not_found	-	180
+p04	search-quality	ask	Who holds the 2012-2023 copyright in my license files?	waskom	-	180
+p05	search-quality	ask	Which of my files mentions the Contributor Covenant?	code.of.conduct|code_of_conduct	-	180
+p06	search-quality	ask	What are my universal answer candidates for job applications?	email|rishabh|phone	-	180
+p07	search-quality	ask	How many strong candidates does the dashboard snapshot show?	42	-	180
+p08	search-quality	ask	What wallet address is used for the RustChain bounty?	c4c7r9	-	180
+o01	invariants	shell	lsof -iTCP -sTCP:LISTEN -n -P 2>/dev/null | grep -E ':6767|:11434' | grep -v 127.0.0.1 | wc -l | tr -d ' '	^0$	-	30
+o02	invariants	shell	wc -l < /tmp/usecase-run/egress-violations.txt | tr -d ' '	^0$	-	30
+o03	invariants	shell	pgrep -f 'debug/MnemoApp' >/dev/null && echo APP_ALIVE	app_alive	-	30
+o04	invariants	shell	curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:6767/v3/documents/list -H 'Content-Type: application/json' -H "Authorization: Bearer $(cat ~/.supermemory/data/api-key)" -d '{"page":1,"limit":1}'	200	-	30
+o05	invariants	shell	curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:11434/api/version	200	-	30

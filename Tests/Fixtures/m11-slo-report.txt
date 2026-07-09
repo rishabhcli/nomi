@@ -1,0 +1,27 @@
+=== idle (warm model) ===
+  [idle] "What is my favorite build tool…" first=2285ms total=2619ms
+  [idle] "When did I switch to Bazel?…" first=3541ms total=4044ms
+  [idle] "How often does the staging pas…" first=2196ms total=2512ms
+  [idle] "What is the search latency tar…" first=2577ms total=2893ms
+=== under background ingest load ===
+  [load] "What is my favorite build tool…" first=2900ms total=3158ms
+  [load] "When did I switch to Bazel?…" first=2094ms total=2495ms
+  [load] "How often does the staging pas…" first=2273ms total=2587ms
+  [load] "What is the search latency tar…" first=1487ms total=1831ms
+--- SLO report ---
+first-token P95 idle=3541ms  underLoad=2900ms  (SLA 1500ms)
+warm-model (no cold-load spike on later queries): OK
+
+--- interpretation (honest) ---
+- NO-STALL-UNDER-LOAD (AT-M11.1/11.2): PASS. First-token P95 under background
+  ingest load (2900ms) is NOT worse than idle (3541ms) — background work does
+  not degrade the interactive path. This is the milestone's core guarantee.
+- WARM MODEL (AT-M11.4): PASS. No cold-load spike on later queries (keep_alive
+  30m; `ollama ps` shows gpt-oss:20b resident 100% GPU).
+- PREEMPTION/PRIORITY (AT-M11.3): PASS (WorkScheduler unit tests: background
+  yields/abandons to interactive within one chunk).
+- ABSOLUTE first-token SLA of 1500ms: NOT met on the recommended gpt-oss:20b
+  tier on this M3 Max via the self-hosted engine path (measured ~2.2–3.5s).
+  Dominated by model prefill of the profile preamble + context, not by
+  scheduling. Paths to meet it: floor-tier qwen3:4b, a leaner preamble cap,
+  or prompt-cache reuse. Reported as measured, not asserted.

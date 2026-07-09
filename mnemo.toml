@@ -1,0 +1,57 @@
+# Mnemo — single source of config (PLAN.md Appendix A).
+# No hardcoded hosts, ports, or model ids in code: everything reads this file.
+
+[engine]
+base_url = "http://127.0.0.1:6767"     # MUST be loopback; validated at startup
+byom = "ollama"                         # engine's generation slot -> local model
+embeddings = "local"                    # never remote
+
+[model]
+runtime_base_url = "http://127.0.0.1:11434"
+synthesis = "gpt-oss:20b"               # recommended tier
+fallback  = "qwen3:4b"                  # 12GB floor tier
+keep_alive = "30m"                      # resident; no cold load on a query
+
+[model.effort]                          # gpt-oss reasoning effort per path
+routing = "low"
+extraction = "low"
+synthesis = "medium"
+multihop = "high"
+
+[smfs]
+mount_point = "~/Mnemo/memory"
+backing_store = "http://127.0.0.1:6767" # MUST equal engine.base_url; refuse cloud
+
+[sync]
+poll_seconds = 30
+queue_max = 4096
+
+[retrieval]
+default_mode = "memories"               # memories | hybrid
+rerank = true
+threshold = 0.35
+limit = 12
+
+[agentic]
+max_hops = 6
+
+[dreaming]
+interval = "6h"
+cold_threshold_days = 30
+
+[sla]
+first_token_ms = 1500                   # P95 under background load
+sources_render_ms = 1000                # source cards sub-second
+
+[ui]
+deployment_target = "macOS 26.0"        # required by Liquid Glass; set in Package.swift
+summon = "both"                         # notch | hotkey | both
+hotkey = "cmd+shift+space"              # keyboard-only / fallback summon
+notch_hover_zone_px = 8                 # cursor proximity to the top edge that arms the notch
+virtual_notch = true                    # draw a notch on displays without a physical one
+glass = "regular"                       # Liquid Glass variant: regular | clear
+reduce_motion = "system"                # follow the system Reduce Motion setting for morphs
+
+[privacy]
+egress_guard = "enforce"                # enforce | audit; enforce = block + fail
+telemetry = "off"                       # for app, engine, smfs, and ollama

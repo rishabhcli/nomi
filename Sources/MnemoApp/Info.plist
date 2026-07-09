@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key>
+	<string>ai.mnemo.app</string>
+	<key>CFBundleName</key>
+	<string>Mnemo</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSSupportsSuddenTermination</key>
+	<false/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Mnemo listens only while you hold the notch to dictate. Audio is processed entirely on this Mac and never leaves it.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Dictation is transcribed on-device only. Nothing is sent to Apple or any server — Mnemo works with the network off.</string>
+</dict>
+</plist>

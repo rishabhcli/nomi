@@ -1,0 +1,136 @@
+{"q": "reconcile the timeline across the design doc, the kickoff memo and the spec?", "intent": "multihop"}
+{"q": "what is the badge code number?", "intent": "lookup"}
+{"q": "what year did I leave the old job?", "intent": "lookup"}
+{"q": "how do the kickoff memo and the June retro relate to each other?", "intent": "multihop"}
+{"q": "compare and contrast the April note against the design doc?", "intent": "multihop"}
+{"q": "give me an overview of the product launch?", "intent": "synthesis"}
+{"q": "tell me about the refactor?", "intent": "synthesis"}
+{"q": "walk me through the incident?", "intent": "synthesis"}
+{"q": "what is my coffee order?", "intent": "lookup"}
+{"q": "who is my doctor?", "intent": "lookup"}
+{"q": "do I tend to review pull requests?", "intent": "profile"}
+{"q": "when did I buy the laptop?", "intent": "lookup"}
+{"q": "what are my preferences for email?", "intent": "profile"}
+{"q": "summarize what happened with the release?", "intent": "synthesis"}
+{"q": "what's the story behind the incident?", "intent": "synthesis"}
+{"q": "explain the refactor to me?", "intent": "synthesis"}
+{"q": "contrast my notes in the April note versus the May sync?", "intent": "multihop"}
+{"q": "trace how the idea evolved from the kickoff memo to the RFC to the June retro?", "intent": "multihop"}
+{"q": "how do the spec and the April note relate to each other?", "intent": "multihop"}
+{"q": "what's my work email?", "intent": "lookup"}
+{"q": "who is my team lead?", "intent": "lookup"}
+{"q": "explain the outage to me?", "intent": "synthesis"}
+{"q": "tell me about the outage?", "intent": "synthesis"}
+{"q": "summarize what you know about my note-taking habits?", "intent": "profile"}
+{"q": "where is the config file?", "intent": "lookup"}
+{"q": "what's the difference between the May sync and the RFC?", "intent": "multihop"}
+{"q": "how do I normally review pull requests?", "intent": "profile"}
+{"q": "when did I move to SF?", "intent": "lookup"}
+{"q": "what's the difference between the June retro and the spec?", "intent": "multihop"}
+{"q": "how do I usually handle meetings?", "intent": "profile"}
+{"q": "recap the outage?", "intent": "synthesis"}
+{"q": "what is my work email?", "intent": "lookup"}
+{"q": "what do you know about me?", "intent": "profile"}
+{"q": "what is the config file number?", "intent": "lookup"}
+{"q": "how do I normally run retros?", "intent": "profile"}
+{"q": "compare and contrast the design doc against the roadmap?", "intent": "multihop"}
+{"q": "what's my usual approach to debugging?", "intent": "profile"}
+{"q": "what's the phone model?", "intent": "lookup"}
+{"q": "tell me about the release?", "intent": "synthesis"}
+{"q": "what are my preferences for testing?", "intent": "profile"}
+{"q": "what's my usual approach to testing?", "intent": "profile"}
+{"q": "what year did I buy the laptop?", "intent": "lookup"}
+{"q": "what's the difference between the RFC and the spec?", "intent": "multihop"}
+{"q": "trace how the idea evolved from the postmortem to the June retro to the April note?", "intent": "multihop"}
+{"q": "describe the migration?", "intent": "synthesis"}
+{"q": "explain the migration to me?", "intent": "synthesis"}
+{"q": "where is the API key?", "intent": "lookup"}
+{"q": "across the May sync and the kickoff memo, what changed and why?", "intent": "multihop"}
+{"q": "when did I adopt Rust?", "intent": "lookup"}
+{"q": "reconcile what the April note says with what the roadmap says?", "intent": "multihop"}
+{"q": "when is my standup?", "intent": "lookup"}
+{"q": "recap the product launch?", "intent": "synthesis"}
+{"q": "give me an overview of the outage?", "intent": "synthesis"}
+{"q": "what's my general style with code review?", "intent": "profile"}
+{"q": "describe the release?", "intent": "synthesis"}
+{"q": "what's my phone model?", "intent": "lookup"}
+{"q": "walk me through the refactor?", "intent": "synthesis"}
+{"q": "compare the decision in the meeting notes with the constraint in the April note?", "intent": "multihop"}
+{"q": "summarize what happened with the incident?", "intent": "synthesis"}
+{"q": "do I tend to structure my week?", "intent": "profile"}
+{"q": "how does the plan in the design doc differ from the outcome in the spec?", "intent": "multihop"}
+{"q": "when is my renewal date?", "intent": "lookup"}
+{"q": "reconcile what the April note says with what the June retro says?", "intent": "multihop"}
+{"q": "which API key did I use?", "intent": "lookup"}
+{"q": "what's my typical meetings style?", "intent": "profile"}
+{"q": "how do I usually handle testing?", "intent": "profile"}
+{"q": "what's the difference between the meeting notes and the RFC?", "intent": "multihop"}
+{"q": "summarize what you know about my testing habits?", "intent": "profile"}
+{"q": "what's my typical note-taking style?", "intent": "profile"}
+{"q": "what's my usual approach to email?", "intent": "profile"}
+{"q": "remind me of my usual writing routine?", "intent": "profile"}
+{"q": "explain the product launch to me?", "intent": "synthesis"}
+{"q": "summarize what you know about my code review habits?", "intent": "profile"}
+{"q": "how does the plan in the roadmap differ from the outcome in the May sync?", "intent": "multihop"}
+{"q": "who is my manager?", "intent": "lookup"}
+{"q": "across the June retro and the meeting notes, what changed and why?", "intent": "multihop"}
+{"q": "where is the badge code?", "intent": "lookup"}
+{"q": "walk me through the audit?", "intent": "synthesis"}
+{"q": "how do I usually handle debugging?", "intent": "profile"}
+{"q": "what's my main editor?", "intent": "lookup"}
+{"q": "what's my typical testing style?", "intent": "profile"}
+{"q": "summarize what you know about my writing habits?", "intent": "profile"}
+{"q": "how do the June retro and the roadmap relate to each other?", "intent": "multihop"}
+{"q": "which badge code did I use?", "intent": "lookup"}
+{"q": "summarize what happened with the product launch?", "intent": "synthesis"}
+{"q": "give me an overview of the audit?", "intent": "synthesis"}
+{"q": "where is the renderer project?", "intent": "lookup"}
+{"q": "what's the story behind the audit?", "intent": "synthesis"}
+{"q": "reconcile the timeline across the RFC, the design doc and the spec?", "intent": "multihop"}
+{"q": "recap the audit?", "intent": "synthesis"}
+{"q": "compare and contrast the spec against the design doc?", "intent": "multihop"}
+{"q": "reconcile what the June retro says with what the May sync says?", "intent": "multihop"}
+{"q": "do I tend to run retros?", "intent": "profile"}
+{"q": "tell me about the budget cut?", "intent": "synthesis"}
+{"q": "reconcile the timeline across the June retro, the kickoff memo and the May sync?", "intent": "multihop"}
+{"q": "reconcile the timeline across the June retro, the roadmap and the spec?", "intent": "multihop"}
+{"q": "what year did I join the team?", "intent": "lookup"}
+{"q": "tell me about the incident?", "intent": "synthesis"}
+{"q": "compare the decision in the postmortem with the constraint in the May sync?", "intent": "multihop"}
+{"q": "what's the story behind the budget cut?", "intent": "synthesis"}
+{"q": "what's my typical debugging style?", "intent": "profile"}
+{"q": "when did I finish the migration?", "intent": "lookup"}
+{"q": "contrast my notes in the RFC versus the roadmap?", "intent": "multihop"}
+{"q": "across the kickoff memo and the design doc, what changed and why?", "intent": "multihop"}
+{"q": "remind me of my usual planning routine?", "intent": "profile"}
+{"q": "what's the favorite build tool?", "intent": "lookup"}
+{"q": "who is my dentist?", "intent": "lookup"}
+{"q": "describe the incident?", "intent": "synthesis"}
+{"q": "what's the office address?", "intent": "lookup"}
+{"q": "what is the API key number?", "intent": "lookup"}
+{"q": "how does the plan in the kickoff memo differ from the outcome in the May sync?", "intent": "multihop"}
+{"q": "contrast my notes in the spec versus the meeting notes?", "intent": "multihop"}
+{"q": "give me an overview of the migration?", "intent": "synthesis"}
+{"q": "recap the refactor?", "intent": "synthesis"}
+{"q": "how does the plan in the June retro differ from the outcome in the spec?", "intent": "multihop"}
+{"q": "what's my general style with debugging?", "intent": "profile"}
+{"q": "what's my usual approach to writing?", "intent": "profile"}
+{"q": "summarize what happened with the refactor?", "intent": "synthesis"}
+{"q": "what are my preferences for debugging?", "intent": "profile"}
+{"q": "reconcile what the postmortem says with what the design doc says?", "intent": "multihop"}
+{"q": "compare and contrast the kickoff memo against the spec?", "intent": "multihop"}
+{"q": "compare the decision in the postmortem with the constraint in the RFC?", "intent": "multihop"}
+{"q": "across the meeting notes and the June retro, what changed and why?", "intent": "multihop"}
+{"q": "what is my primary language?", "intent": "lookup"}
+{"q": "what's the story behind the release?", "intent": "synthesis"}
+{"q": "describe the product launch?", "intent": "synthesis"}
+{"q": "how do I normally structure my week?", "intent": "profile"}
+{"q": "contrast my notes in the kickoff memo versus the design doc?", "intent": "multihop"}
+{"q": "trace how the idea evolved from the spec to the kickoff memo to the April note?", "intent": "multihop"}
+{"q": "when is my flight?", "intent": "lookup"}
+{"q": "what's the story behind the outage?", "intent": "synthesis"}
+{"q": "what's my general style with testing?", "intent": "profile"}
+{"q": "how do the RFC and the April note relate to each other?", "intent": "multihop"}
+{"q": "compare the decision in the spec with the constraint in the design doc?", "intent": "multihop"}
+{"q": "trace how the idea evolved from the May sync to the June retro to the April note?", "intent": "multihop"}
+{"q": "explain the hiring round to me?", "intent": "synthesis"}
