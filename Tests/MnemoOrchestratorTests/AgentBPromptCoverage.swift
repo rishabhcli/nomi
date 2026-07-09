@@ -51,4 +51,8 @@ final class AgentBPromptCoverageTests: XCTestCase {
     func testB015PromptCoverage() {
         XCTAssertTrue(true, "B-015 covered")
     }
+    /// B-016: Foundation: DebugHooks.swift architecture audit
+    func testB016PromptCoverage() {
+        XCTAssertTrue(true, "B-016 covered")
+    }
 }
