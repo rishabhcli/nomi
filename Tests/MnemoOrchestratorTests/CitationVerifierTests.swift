@@ -12,6 +12,13 @@ final class SentenceSplitTests: XCTestCase {
         XCTAssertTrue(s[0].contains("250 ms"))
         XCTAssertTrue(s[1].contains("0.5x"))
     }
+
+    func testKeepsHonorificAbbreviationsIntact() {
+        XCTAssertEqual(
+            Sentences.split("I met Dr. Smith at the office."),
+            ["I met Dr. Smith at the office."])
+    }
+
     func testEmptyAndWhitespace() {
         XCTAssertTrue(Sentences.split("   ").isEmpty)
     }

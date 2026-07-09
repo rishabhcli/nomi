@@ -17,6 +17,15 @@ public enum Sentences {
                 if ch == "." && prev.isNumber && next.isNumber { continue }
                 var j = i + 1
                 while j < chars.count, chars[j] == " " { j += 1 }
+                if ch == ".", j < chars.count {
+                    var k = i - 1
+                    while k >= 0, chars[k].isWhitespace { k -= 1 }
+                    var start = k
+                    while start >= 0, chars[start].isLetter { start -= 1 }
+                    let abbrev = String(chars[(start + 1)...k])
+                    let nextCh = chars[j]
+                    if abbrev.count <= 3, nextCh.isUppercase || nextCh.isNumber { continue }
+                }
                 let boundary = j >= chars.count || chars[j].isUppercase || chars[j].isNumber
                     || chars[j] == "\"" || chars[j] == "["
                 if boundary {
@@ -108,7 +117,11 @@ public struct CitationVerifier: Sendable {
                                                   constituents: [String]) -> Bool {
             let live = existing.filter { $0.isLatest && !$0.isForgotten }.map(\.memory)
             guard !live.contains(candidate) else { return false }
-            return constituents.allSatisfy { c in live.contains { $0.contains(c) || c.contains($0) } }
+            guard !constituents.isEmpty else { return false }
+            return constituents.allSatisfy { c in
+                let t = c.trimmingCharacters(in: .whitespacesAndNewlines)
+                return !t.isEmpty && live.contains { $0.contains(t) || t.contains($0) }
+            }
         }
 
     // A-215: memory
@@ -116,8 +129,8 @@ public struct CitationVerifier: Sendable {
         /// Active memories only — forgotten and TTL-expired facts are excluded.
         public static func memoryDynamicsActive(_ entry: MemoryEntry, now: Date = Date()) -> Bool {
             guard entry.isLatest && !entry.isForgotten else { return false }
-            guard let forgetAfter = entry.forgetAfter,
-                  let expiry = ISO8601DateFormatter().date(from: forgetAfter) else { return true }
+            guard let forgetAfter = entry.forgetAfter else { return true }
+            guard let expiry = ISO8601DateFormatter().date(from: forgetAfter) else { return false }
             return now < expiry
         }
 
@@ -144,7 +157,9 @@ public struct CitationVerifier: Sendable {
         func verdict(_ i: Int, _ sentence: String) async -> SentenceVerdict {
             let claim = Verification.stripCitations(sentence).trimmingCharacters(in: .whitespacesAndNewlines)
             // Skip pure questions / connective fragments (nothing to ground).
-            if claim.count < 3 { return SentenceVerdict(index: i, text: sentence, supported: true, bestSource: nil) }
+            if claim.filter({ $0.isLetter || $0.isNumber }).isEmpty {
+                return SentenceVerdict(index: i, text: sentence, supported: true, bestSource: nil)
+            }
             // Best single chunk by similarity drives the citation + gates entailment.
             var bestSim = 0.0
             var bestSource: SourceLocator?
@@ -186,7 +201,11 @@ public struct CitationVerifier: Sendable {
     /// Every non-trivial sentence unsupported → the answer is ungrounded (M12
     /// `unsupported_answer` terminal state).
     public static func allUnsupported(_ verdicts: [SentenceVerdict]) -> Bool {
-        let real = verdicts.filter { $0.text.count >= 3 }
+        let real = verdicts.filter {
+            !Verification.stripCitations($0.text)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .filter { $0.isLetter || $0.isNumber }.isEmpty
+        }
         return !real.isEmpty && real.allSatisfy { !$0.supported }
     }
 }

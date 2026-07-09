@@ -81,8 +81,13 @@ public actor EgressGuard {
     public func beginQueryWindow() -> Window {
         let w = Window(id: UUID())
         current = w
-        attempts = 0
         return w
+    }
+
+    /// Clears measurement state (tests / new session only).
+    public func reset() {
+        attempts = 0
+        current = nil
     }
 
     public func recordAttempt(host: String) {

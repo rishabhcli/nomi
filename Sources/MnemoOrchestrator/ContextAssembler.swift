@@ -94,8 +94,9 @@ public struct ContextAssembler: Sendable {
         let preamble = buildPreamble(profile, cap: Int(Double(tokenBudget) * preambleFraction))
         let remaining = max(0, tokenBudget - TokenEstimate.of(preamble))
 
-        // Highest similarity first; keep while it fits.
-        let ranked = evidence.sorted { $0.similarity > $1.similarity }
+        // Highest similarity first; keep while it fits. Profile memories are
+        // query-relevant retrieval hits and must merge into the evidence pool.
+        let ranked = (evidence + profile.memories).sorted { $0.similarity > $1.similarity }
         var kept: [Retrieved] = []
         var used = 0
         for hit in ranked {

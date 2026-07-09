@@ -36,10 +36,15 @@ extension QueryService {
             // document entirely — the top chunks carry the source text.
             if documentSearchEnabled, let docSearcher = retriever as? DocumentSearching {
                 let chunkLimit = hits.isEmpty ? defaults.limit : 3
-                let chunks = (try? await docSearcher.searchDocuments(sub, container: defaults.container, limit: chunkLimit)) ?? []
-                var added = 0
-                for h in chunks where seen.insert(dedupeKey(h)).inserted { merged.append(h); added += 1 }
-                if added > 0, hits.isEmpty { steps.append("Used the engine's document search") }
+                do {
+                    let chunks = try await docSearcher.searchDocuments(sub, container: defaults.container, limit: chunkLimit)
+                    var added = 0
+                    for h in chunks where seen.insert(dedupeKey(h)).inserted { merged.append(h); added += 1 }
+                    if added > 0, hits.isEmpty { steps.append("Used the engine's document search") }
+                } catch {
+                    if hits.isEmpty { throw error }
+                    steps.append("Document search unavailable for this sub-question")
+                }
             }
         }
         steps.append("Searched memory (\(merged.count) hits)")
@@ -52,14 +57,15 @@ extension QueryService {
                 q: q, searchMode: defaults.searchMode, rerank: defaults.rerank,
                 threshold: defaults.threshold, limit: defaults.limit, container: defaults.container)))
             if (broader.map(\.similarity).max() ?? 0) > topSim || (merged.isEmpty && !broader.isEmpty) {
-                merged = broader
+                for h in broader where seen.insert(dedupeKey(h)).inserted { merged.append(h) }
                 broadened = true
                 steps.append("Broadened the search (weak coverage)")
             }
         }
 
         // Agentic multi-hop (#1): follow the thread across files.
-        if intent == .multihop, let agentic, let result = try? await agentic.run(q, scope: nil) {
+        if intent == .multihop, let agentic {
+            let result = try await agentic.run(q, scope: nil)
             var added = 0
             for h in result.evidence where seen.insert(dedupeKey(h)).inserted { merged.append(h); added += 1 }
             if !result.hops.isEmpty { steps.append("Followed the thread across files (\(result.hops.count) hops, +\(added) evidence)") }
@@ -70,15 +76,16 @@ extension QueryService {
         // Supplementary only — recalled chat can never be the sole "evidence"
         // (a junk query would otherwise ground itself in its own transcript).
         if chatRecallEnabled, !merged.isEmpty, let container = defaults.container {
-            let recalled = (try? await retriever.search(SearchRequest(
+            let recalled = try await retriever.search(SearchRequest(
                 q: q, searchMode: "memories", rerank: false,
-                threshold: defaults.threshold, limit: 3, container: "\(container)-chat"))) ?? []
+                threshold: defaults.threshold, limit: 3, container: "\(container)-chat"))
             var added = 0
             let queryEcho = q.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-            for h in recalled where seen.insert(dedupeKey(h)).inserted {
+            for h in recalled {
                 // An echo of this very question (same turn asked before, or a
                 // junk query's own transcript) is not knowledge — skip it.
-                if queryEcho.count >= 12, h.memory.lowercased().contains(queryEcho) { continue }
+                if !queryEcho.isEmpty, h.memory.lowercased().contains(queryEcho) { continue }
+                guard seen.insert(dedupeKey(h)).inserted else { continue }
                 // Re-title so recalled turns cite legibly (not a raw transcript tag).
                 let src = SourceLocator(docId: h.source.docId, path: h.source.path,
                                         title: Self.chatRecallTitle,
@@ -107,8 +114,14 @@ extension QueryService {
     /// Dedup key: docId when known, else path, else the text itself (agentic
     /// memory hits carry no docId).
     func dedupeKey(_ h: Retrieved) -> String {
-        !h.source.docId.isEmpty ? "id:\(h.source.docId)"
-            : (!h.source.path.isEmpty ? "path:\(h.source.path)" : "mem:\(h.memory)")
+        if !h.source.docId.isEmpty {
+            if let s = h.source.charStart, let e = h.source.charEnd {
+                return "id:\(h.source.docId)@\(s)-\(e)"
+            }
+            return "id:\(h.source.docId)|\(h.memory.prefix(80))"
+        }
+        if !h.source.path.isEmpty { return "path:\(h.source.path)|\(h.memory.prefix(80))" }
+        return "mem:\(h.memory)"
     }
 
     func search(_ q: String, mode: String) async throws -> [Retrieved] {

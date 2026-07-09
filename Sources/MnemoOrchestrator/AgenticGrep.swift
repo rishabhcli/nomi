@@ -220,14 +220,15 @@ public struct SMFSGrep: GrepSurface {
 
     /// Maps `(unknown)` memory-level hits to real mount paths via ingest metadata.
     public static func resolveUnknownHits(_ hits: [GrepHit], docs: [DocumentMeta]) -> [GrepHit] {
-        let byTitle = Dictionary(uniqueKeysWithValues: docs.compactMap { d -> (String, String)? in
+        let byTitle = docs.compactMap { d -> (String, String)? in
             guard let title = d.title, let fp = d.filepath, !fp.isEmpty else { return nil }
             return (title.lowercased(), fp)
-        })
+        }.sorted { $0.0.count > $1.0.count }
         return hits.map { hit in
             guard hit.path.isEmpty else { return hit }
-            if let match = byTitle.first(where: { hit.snippet.lowercased().contains($0.key) }) {
-                return GrepHit(path: match.value, lineStart: hit.lineStart,
+            let lower = hit.snippet.lowercased()
+            if let match = byTitle.first(where: { lower.contains($0.0) }) {
+                return GrepHit(path: match.1, lineStart: hit.lineStart,
                                lineEnd: hit.lineEnd, snippet: hit.snippet)
             }
             return hit
