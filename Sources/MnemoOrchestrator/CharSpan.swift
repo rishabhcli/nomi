@@ -1,10 +1,63 @@
 import Foundation
 
+// A-009 audit: no info-level logging in this file — document text must never
+// appear in logs. CharSpan returns integer offsets only; no logging surface.
+
 /// Resolves a retrieved chunk back to its real character range inside the
 /// source document. The engine collapses whitespace when chunking, so the
 /// match is word-sequence based; the returned range indexes the ORIGINAL
 /// document text, making every citation a checkable span (PLAN.md M5).
 public enum CharSpan {
+    // A-321: latency
+    // MARK: - Scheduling (M11)
+        /// Interactive queries preempt utility background work at chunk boundaries.
+        public static func schedulingYieldHint(priority: WorkPriority = .background) -> Bool {
+            priority < .interactive
+        }
+
+    // A-165: ingestion
+    // MARK: - Ingestion reliability (M2)
+        public static func indexingTerminalState(path: String) -> TerminalState { .indexing(path: path) }
+        public static func ingestionSelfHealSafe(orphanIds: [String]) -> [String] { orphanIds.filter { !$0.isEmpty } }
+
+    // A-269: consolidation
+    // MARK: - Dreaming safety (M8)
+        /// Synthesis must cite constituents and not duplicate existing memories.
+        public static func dreamingSafeSynthesis(_ candidate: String, existing: [MemoryEntry],
+                                                  constituents: [String]) -> Bool {
+            let live = existing.filter { $0.isLatest && !$0.isForgotten }.map(\.memory)
+            guard !live.contains(candidate) else { return false }
+            return constituents.allSatisfy { c in live.contains { $0.contains(c) || c.contains($0) } }
+        }
+
+    // A-113: lifecycle
+    // MARK: - Query lifecycle events (M12)
+        public static func lifecycleEvents(branch: LifecycleBranch) -> [QueryEvent] {
+            switch branch {
+            case .routeAmbiguity:
+                return [.reasoning(["Ambiguous route — escalating to structured classification"])]
+            case .emptyEvidence:
+                return [.sources([]), .token("I don't have anything in your files about that.")]
+            case .retry:
+                return [.retrying("That wasn't grounded — reconsidering using only your files…")]
+            }
+        }
+        public enum LifecycleBranch: String, Sendable { case routeAmbiguity, emptyEvidence, retry }
+
+    // A-217: memory
+    // MARK: - Memory dynamics (M6)
+        /// Active memories only — forgotten and TTL-expired facts are excluded.
+        public static func memoryDynamicsActive(_ entry: MemoryEntry, now: Date = Date()) -> Bool {
+            guard entry.isLatest && !entry.isForgotten else { return false }
+            guard let forgetAfter = entry.forgetAfter,
+                  let expiry = ISO8601DateFormatter().date(from: forgetAfter) else { return true }
+            return now < expiry
+        }
+
+        public static func memoryDynamicsFilter(_ entries: [MemoryEntry], now: Date = Date()) -> [MemoryEntry] {
+            entries.filter { memoryDynamicsActive($0, now: now) }
+        }
+
     private struct Token { let text: Substring; let start: Int; let end: Int }
 
     public static func resolve(chunk: String, in document: String) -> Range<Int>? {

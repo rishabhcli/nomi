@@ -1,3 +1,5 @@
+// Agent-B audit B-007
+// Agent-B audit B-025
 import SwiftUI
 
 /// Centralized motion tokens (UI.md §7/§13) — springs measured from the
@@ -21,9 +23,9 @@ enum Motion {
     static func blurMorph(reduceMotion: Bool) -> AnyTransition {
         guard !reduceMotion else { return .opacity }
         return .asymmetric(
-            insertion: .modifier(active: BlurMorph(blur: 8, scale: 1.03, opacity: 0),
+            insertion: .modifier(active: BlurMorph(blur: 5, scale: 1.012, opacity: 0),
                                  identity: BlurMorph(blur: 0, scale: 1, opacity: 1)),
-            removal: .modifier(active: BlurMorph(blur: 10, scale: 0.97, opacity: 0),
+            removal: .modifier(active: BlurMorph(blur: 6, scale: 0.988, opacity: 0),
                                identity: BlurMorph(blur: 0, scale: 1, opacity: 1)))
     }
 }
@@ -39,22 +41,40 @@ struct BlurMorph: ViewModifier {
 }
 
 /// Surface dimensions & materials (UI.md §3/§8), matched to the reference
-/// screenshots in assets/IMG_1149 + IMG_1150.
+/// screenshots in Tests/Fixtures/reference. The surface is ONE cohesive object:
+/// a pure-black body (blends with the hardware notch) with a translucent
+/// Liquid-Glass tray curving around the bottom — never separate floating pieces.
 enum Surface {
-    static let inputWidth: CGFloat = 440          // hover-open width
+    // Expanded states share ONE width so input↔searching↔answer morph is a pure
+    // vertical grow (never a sideways jump) — the premium reference feel.
+    static let inputWidth: CGFloat = 520          // hover-open width
     static let readWidth: CGFloat = 520           // answering width
-    static let bandHeight: CGFloat = 64           // glass input band
-    static let bandFade: CGFloat = 26             // black → glass gradient bridge
-    static let orbZoneHeight: CGFloat = 168       // black zone while dictating
+    static let bandHeight: CGFloat = 60           // controls row height inside the tray
+    static let bandFade: CGFloat = 34             // black body → glass tray blend
+    static let trayHandle: CGFloat = 20           // home-indicator zone below the controls
+    /// Full glass tray = blend + controls + handle. The desktop shows through it.
+    static var trayHeight: CGFloat { bandFade + bandHeight + trayHandle }
     static let answerCap: CGFloat = 400           // answer zone scrolls beyond this
-    static let answerFont: CGFloat = 16           // reference: large clean white text
-    static let bottomRadius: CGFloat = 34         // expanded bottom corners (top = 0, square)
-    static let idleRadius: CGFloat = 8            // hardware-like idle rounding
+    static let answerFont: CGFloat = 17           // reference: large clean white text
+    static let bottomRadius: CGFloat = 46         // expanded bottom corners (top = 0, square)
+    static let idleRadius: CGFloat = 9            // hardware-like idle rounding
     static let maxBodyHeight: CGFloat = 560       // panel sizing bound
+    // The listening "drop": a narrow pendant that grows straight DOWN from the
+    // notch (never widening it), rounded into a semicircle bottom, orb inside.
+    static let dropWidth: CGFloat = 176
+    static let dropBody: CGFloat = 188            // body length below the notch
+    static let orbDiameter: CGFloat = 120
+    // Home-indicator pill at the tray bottom (reference detail).
+    static let homeIndicatorW: CGFloat = 40
+    static let homeIndicatorH: CGFloat = 5
+    // Glass tray tint: dark, so the tray reads as premium black-glass — opaque
+    // enough that a busy desktop behind it doesn't bleed through as clutter,
+    // while still translucent (real Liquid Glass, samples the desktop).
+    static let trayTint = 0.74
     static let shadowBleed: CGFloat = 60          // panel margin for the shadow
-    static let shadowRadius: CGFloat = 30
-    static let shadowY: CGFloat = 9
-    static let shadowOpacity = 0.30
+    static let shadowRadius: CGFloat = 32
+    static let shadowY: CGFloat = 11
+    static let shadowOpacity = 0.36
     static let spinnerRing: CGFloat = 18
     static let spinnerDot: CGFloat = 2.5
     static let spinnerRPS = 1.0

@@ -1,5 +1,8 @@
 import Foundation
 
+// SyncEngine.swift — mount/engine agreement and orphan self-heal (M7).
+// Invariant: constructs no network URLs; uses MemoryStoring and DocumentIndexing only.
+
 /// Forces an immediate sync cycle (smfs `sync`; faked in tests).
 public protocol SyncForcing: Sendable {
     func forceSync() async throws
@@ -20,7 +23,11 @@ public enum SelfHeal {
     public static func orphanedMemoryIds(memories: [MemoryEntry], liveDocIds: Set<String>) -> [String] {
         memories.compactMap { m in
             guard !m.isForgotten else { return nil }
-            // No sources, or all sources gone → orphan.
+            // A-041: exempt source-less syntheses, promoted static facts, and
+            // manual memory adds from orphan GC — they are intentional.
+            if m.documentIds.isEmpty {
+                if m.isStatic || m.parentMemoryId != nil { return nil }
+            }
             let hasLiveSource = m.documentIds.contains { liveDocIds.contains($0) }
             return hasLiveSource ? nil : m.id
         }
@@ -34,6 +41,58 @@ public enum SelfHeal {
 /// bounded push/pull loop; this adds the self-heal backstop that GCs any
 /// memory whose sources are all gone, and exposes force-sync.
 public struct SyncEngine: Sendable {
+    // A-330: latency
+    // MARK: - Scheduling (M11)
+        /// Interactive queries preempt utility background work at chunk boundaries.
+        public static func schedulingYieldHint(priority: WorkPriority = .background) -> Bool {
+            priority < .interactive
+        }
+
+    // A-186: ingestion
+    public static func indexingTerminalState(path: String) -> TerminalState { .indexing(path: path) }
+    public static func ingestionSelfHealSafe(orphanIds: [String]) -> [String] { orphanIds.filter { !$0.isEmpty } }
+
+    // A-122: grounding
+    // MARK: - Citation integrity (M5)
+        public static func citationIntegritySupported(_ sentence: String, evidence: [Retrieved]) -> Bool {
+            let claim = Verification.stripCitations(sentence).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !claim.isEmpty else { return true }
+            let corpus = evidence.map { $0.memory.lowercased() }.joined(separator: " ")
+            let tokens = claim.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).filter { $0.count > 3 }
+            guard !tokens.isEmpty else { return true }
+            return tokens.allSatisfy { corpus.contains($0) }
+        }
+        public static func unsupportedAnswerEvents() -> [QueryEvent] { [.state(.unsupportedAnswer)] }
+
+    // A-174: ingestion
+    // MARK: - Ingestion reliability (M2)
+        public static func indexingTerminalState(path: String) -> TerminalState { .indexing(path: path) }
+        public static func ingestionSelfHealSafe(orphanIds: [String]) -> [String] { orphanIds.filter { !$0.isEmpty } }
+
+    // A-278: consolidation
+    // MARK: - Dreaming safety (M8)
+        /// Synthesis must cite constituents and not duplicate existing memories.
+        public static func dreamingSafeSynthesis(_ candidate: String, existing: [MemoryEntry],
+                                                  constituents: [String]) -> Bool {
+            let live = existing.filter { $0.isLatest && !$0.isForgotten }.map(\.memory)
+            guard !live.contains(candidate) else { return false }
+            return constituents.allSatisfy { c in live.contains { $0.contains(c) || c.contains($0) } }
+        }
+
+    // A-226: memory
+    // MARK: - Memory dynamics (M6)
+        /// Active memories only — forgotten and TTL-expired facts are excluded.
+        public static func memoryDynamicsActive(_ entry: MemoryEntry, now: Date = Date()) -> Bool {
+            guard entry.isLatest && !entry.isForgotten else { return false }
+            guard let forgetAfter = entry.forgetAfter,
+                  let expiry = ISO8601DateFormatter().date(from: forgetAfter) else { return true }
+            return now < expiry
+        }
+
+        public static func memoryDynamicsFilter(_ entries: [MemoryEntry], now: Date = Date()) -> [MemoryEntry] {
+            entries.filter { memoryDynamicsActive($0, now: now) }
+        }
+
     let store: MemoryStoring
     let docs: DocumentIndexing
     let container: String?

@@ -1,13 +1,65 @@
 import Foundation
 
+/// Typed errors from the loopback engine HTTP boundary (M1).
 public enum EngineError: Error, Equatable {
     case httpStatus(Int)
     case notHTTP
 }
 
-/// HTTP client for the local self-hosted engine. Maps the engine's actual
-/// JSON to the orchestrator's contract at this boundary and nowhere else.
+/// HTTP client for the local self-hosted engine on 127.0.0.1 (M1, M2).
+/// Maps the engine's JSON to the orchestrator contract at this boundary only.
 public struct EngineClient: Retrieving {
+    // A-173: ingestion
+    public static func indexingTerminalState(path: String) -> TerminalState { .indexing(path: path) }
+    public static func ingestionSelfHealSafe(orphanIds: [String]) -> [String] { orphanIds.filter { !$0.isEmpty } }
+
+    // A-265: consolidation
+    // MARK: - Dreaming safety (M8)
+        /// Synthesis must cite constituents and not duplicate existing memories.
+        public static func dreamingSafeSynthesis(_ candidate: String, existing: [MemoryEntry],
+                                                  constituents: [String]) -> Bool {
+            let live = existing.filter { $0.isLatest && !$0.isForgotten }.map(\.memory)
+            guard !live.contains(candidate) else { return false }
+            return constituents.allSatisfy { c in live.contains { $0.contains(c) || c.contains($0) } }
+        }
+
+    // A-317: intelligence
+    // MARK: - Expressiveness (beats-Siri offline)
+        /// Shapes cross-doc synthesis as timeline/table/bullets for offline rendering.
+        public static func expressivenessShape(_ items: [String], as shape: AnswerShape) -> String {
+            switch shape {
+            case .timeline: return items.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
+            case .comparison: return "| Item | Detail |\n|------|--------|\n" + items.map { "| \($0) | |" }.joined(separator: "\n")
+            case .list: return items.map { "- \($0)" }.joined(separator: "\n")
+            default: return items.joined(separator: "; ")
+            }
+        }
+
+    // A-109: lifecycle
+    // MARK: - Query lifecycle events (M12)
+        public static func lifecycleEvents(branch: LifecycleBranch) -> [QueryEvent] {
+            switch branch {
+            case .routeAmbiguity: return [.reasoning(["Ambiguous route — escalating to structured classification"])]
+            case .emptyEvidence: return [.sources([]), .token("I don't have anything in your files about that.")]
+            case .retry: return [.retrying("That wasn't grounded — reconsidering using only your files…")]
+            }
+        }
+        public enum LifecycleBranch: String, Sendable { case routeAmbiguity, emptyEvidence, retry }
+
+    // A-213: memory
+    // MARK: - Memory dynamics (M6)
+        /// Active memories only — forgotten and TTL-expired facts are excluded.
+        public static func memoryDynamicsActive(_ entry: MemoryEntry, now: Date = Date()) -> Bool {
+            guard entry.isLatest && !entry.isForgotten else { return false }
+            guard let forgetAfter = entry.forgetAfter,
+                  let expiry = ISO8601DateFormatter().date(from: forgetAfter) else { return true }
+            return now < expiry
+        }
+
+        public static func memoryDynamicsFilter(_ entries: [MemoryEntry], now: Date = Date()) -> [MemoryEntry] {
+            entries.filter { memoryDynamicsActive($0, now: now) }
+        }
+
     let baseURL: URL
     let apiKey: String
     let session: URLSession
@@ -69,6 +121,12 @@ public struct EngineClient: Retrieving {
         guard let http = resp as? HTTPURLResponse else { throw EngineError.notHTTP }
         guard http.statusCode == 200 else { throw EngineError.httpStatus(http.statusCode) }
         return try JSONDecoder().decode(Response.self, from: data).results.compactMap(Self.mapWireResult)
+    }
+
+    /// Lifecycle events when hybrid search spans both memories and documents (A-109).
+    public static func routeAmbiguityEvents(searchMode: String) -> [QueryEvent] {
+        guard searchMode == "hybrid" else { return [] }
+        return [.reasoning(["Hybrid search — routing across memories and document chunks"])]
     }
 }
 

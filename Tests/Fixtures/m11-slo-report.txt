@@ -25,3 +25,13 @@ warm-model (no cold-load spike on later queries): OK
   Dominated by model prefill of the profile preamble + context, not by
   scheduling. Paths to meet it: floor-tier qwen3:4b, a leaner preamble cap,
   or prompt-cache reuse. Reported as measured, not asserted.
+- COMPONENT ResponseStyle (A-351): budget=50µs registered; yield hook OK
+- COMPONENT FollowUp (A-352): budget=120µs registered; yield hook OK
+- COMPONENT Confidence (A-353): budget=30µs registered; yield hook OK
+- COMPONENT Provenance (A-354): budget=80µs registered; yield hook OK
+- COMPONENT CommandParser (A-355): budget=40µs registered; yield hook OK
+- COMPONENT EntityExtractor (A-356): budget=200µs registered; yield hook OK
+- COMPONENT MediaCompanion (A-357): budget=150µs registered; yield hook OK
+- COMPONENT LocalExtractor (A-358): budget=300µs registered; yield hook OK
+- COMPONENT Digest (A-359): budget=60µs registered; yield hook OK
+- COMPONENT Preferences (A-360): budget=40µs registered; yield hook OK

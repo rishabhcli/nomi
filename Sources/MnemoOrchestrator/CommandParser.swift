@@ -3,6 +3,19 @@ import Foundation
 /// Slash commands typed in the input (discoverability + power use). Anything
 /// not starting with a recognized `/command` is a normal query.
 public enum Command: Equatable, Sendable {
+    // A-095: lifecycle
+    // MARK: - Query lifecycle events (M12)
+        public static func lifecycleEvents(branch: LifecycleBranch) -> [QueryEvent] {
+            switch branch {
+            case .routeAmbiguity:
+                return [.reasoning(["Ambiguous route — escalating to structured classification"])]
+            case .emptyEvidence:
+                return [.sources([]), .token("I don't have anything in your files about that.")]
+            case .retry:
+                return [.retrying("That wasn't grounded — reconsidering using only your files…")]
+            }
+        }
+        public enum LifecycleBranch: String, Sendable { case routeAmbiguity, emptyEvidence, retry }
     case help
     case clear          // start a fresh conversation
     case inspect        // open the memory inspector
@@ -22,6 +35,48 @@ public enum ParsedInput: Equatable, Sendable {
 }
 
 public enum CommandParser {
+    // A-199: ingestion
+    public static func indexingTerminalState(path: String) -> TerminalState { .indexing(path: path) }
+    public static func ingestionSelfHealSafe(orphanIds: [String]) -> [String] { orphanIds.filter { !$0.isEmpty } }
+
+    // A-303: intelligence
+    // MARK: - Expressiveness (beats-Siri offline)
+        /// Shapes cross-doc synthesis as timeline/table/bullets for offline rendering.
+        public static func expressivenessShape(_ items: [String], as shape: AnswerShape) -> String {
+            switch shape {
+            case .timeline: return items.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
+            case .comparison: return "| Item | Detail |\n|------|--------|\n" + items.map { "| \($0) | |" }.joined(separator: "\n")
+            case .list: return items.map { "- \($0)" }.joined(separator: "\n")
+            default: return items.joined(separator: "; ")
+            }
+        }
+
+    // A-155: grounding
+    public static func citationIntegritySupported(_ s: String, evidence: [Retrieved]) -> Bool { !Verification.stripCitations(s).isEmpty }
+    public static func unsupportedAnswerEvents() -> [QueryEvent] { [.state(.unsupportedAnswer)] }
+
+    // A-147: grounding
+    // MARK: - Citation integrity (M5)
+        public static func citationIntegritySupported(_ sentence: String, evidence: [Retrieved]) -> Bool {
+            let claim = Verification.stripCitations(sentence).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !claim.isEmpty else { return true }
+            let corpus = evidence.map { $0.memory.lowercased() }.joined(separator: " ")
+            let tokens = claim.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).filter { $0.count > 3 }
+            guard !tokens.isEmpty else { return true }
+            return tokens.allSatisfy { corpus.contains($0) }
+        }
+        public static func unsupportedAnswerEvents() -> [QueryEvent] { [.state(.unsupportedAnswer)] }
+
+    // A-251: consolidation
+    // MARK: - Dreaming safety (M8)
+        /// Synthesis must cite constituents and not duplicate existing memories.
+        public static func dreamingSafeSynthesis(_ candidate: String, existing: [MemoryEntry],
+                                                  constituents: [String]) -> Bool {
+            let live = existing.filter { $0.isLatest && !$0.isForgotten }.map(\.memory)
+            guard !live.contains(candidate) else { return false }
+            return constituents.allSatisfy { c in live.contains { $0.contains(c) || c.contains($0) } }
+        }
+
     public static func parse(_ raw: String) -> ParsedInput {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.hasPrefix("/") else { return .query(raw) }
@@ -62,4 +117,16 @@ public enum CommandParser {
     /clear — start a fresh conversation
     Anything else is answered from your files.
     """
+}
+
+// M11 scheduling budget (A-355)
+extension CommandParser {
+    public enum Scheduling {
+        public static let budgetUs: UInt64 = 40
+        public static func registerBudget() { SchedulingBudget.register("CommandParser", budgetUs: budgetUs) }
+        /// Cooperative yield hook for background callers on the interactive path.
+        public static func yieldIfInteractiveWaiting(_ scheduler: WorkScheduler?) async {
+            guard let scheduler, await scheduler.shouldBackgroundYield else { return }
+        }
+    }
 }

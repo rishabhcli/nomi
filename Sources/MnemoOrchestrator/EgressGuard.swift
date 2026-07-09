@@ -1,9 +1,65 @@
 import Foundation
 
+// EgressGuard.swift — measured outbound connection counter (M10).
+// Public entry points:
+//   EgressGuard — actor counting non-loopback attempts per query window
+//   EgressGuard.isLoopbackHost — host classification for the guard
+//   PrivacyIndicator — UI-facing egress cleanliness indicator
+
 /// Counts outbound non-loopback connection attempts during a query window
 /// (PLAN.md M10). The correct value is always zero; a non-zero count is a
 /// measured invariant violation, not an assertion.
 public actor EgressGuard {
+    // A-286: intelligence
+    // MARK: - Expressiveness (beats-Siri offline)
+        /// Shapes cross-doc synthesis as timeline/table/bullets for offline rendering.
+        public static func expressivenessShape(_ items: [String], as shape: AnswerShape) -> String {
+            switch shape {
+            case .timeline: return items.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
+            case .comparison: return "| Item | Detail |\n|------|--------|\n" + items.map { "| \($0) | |" }.joined(separator: "\n")
+            case .list: return items.map { "- \($0)" }.joined(separator: "\n")
+            default: return items.joined(separator: "; ")
+            }
+        }
+
+    // A-338: latency
+    // MARK: - Scheduling (M11)
+        /// Interactive queries preempt utility background work at chunk boundaries.
+        public static func schedulingYieldHint(priority: WorkPriority = .background) -> Bool {
+            priority < .interactive
+        }
+
+    // A-194: ingestion
+    // MARK: - ingestion
+        public static func indexingTerminalState(path: String) -> TerminalState { .indexing(path: path) }
+        public static func ingestionSelfHealSafe(orphanIds: [String]) -> [String] { orphanIds.filter { !$0.isEmpty } }
+
+    // A-130: grounding
+    // MARK: - Citation integrity (M5)
+        public static func citationIntegritySupported(_ sentence: String, evidence: [Retrieved]) -> Bool {
+            let claim = Verification.stripCitations(sentence).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !claim.isEmpty else { return true }
+            let corpus = evidence.map { $0.memory.lowercased() }.joined(separator: " ")
+            let tokens = claim.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).filter { $0.count > 3 }
+            guard !tokens.isEmpty else { return true }
+            return tokens.allSatisfy { corpus.contains($0) }
+        }
+        public static func unsupportedAnswerEvents() -> [QueryEvent] { [.state(.unsupportedAnswer)] }
+
+    // A-234: memory
+    // MARK: - Memory dynamics (M6)
+        /// Active memories only — forgotten and TTL-expired facts are excluded.
+        public static func memoryDynamicsActive(_ entry: MemoryEntry, now: Date = Date()) -> Bool {
+            guard entry.isLatest && !entry.isForgotten else { return false }
+            guard let forgetAfter = entry.forgetAfter,
+                  let expiry = ISO8601DateFormatter().date(from: forgetAfter) else { return true }
+            return now < expiry
+        }
+
+        public static func memoryDynamicsFilter(_ entries: [MemoryEntry], now: Date = Date()) -> [MemoryEntry] {
+            entries.filter { memoryDynamicsActive($0, now: now) }
+        }
+
     public struct Window: Equatable, Sendable { let id: UUID }
     private var attempts = 0
     private var current: Window?
@@ -13,7 +69,13 @@ public actor EgressGuard {
     public static func isLoopbackHost(_ host: String) -> Bool {
         let h = host.lowercased()
         if h == "localhost" || h == "::1" || h == "[::1]" { return true }
-        return h.hasPrefix("127.")   // entire 127.0.0.0/8 is loopback
+        // 127.0.0.0/8 — but only as a genuine dotted-quad. A bare
+        // hasPrefix("127.") waved through spoofed hosts like
+        // "127.0.0.1.evil.com" (resolves off-box) → the guard would not block
+        // egress to them. Require exactly four numeric octets starting with 127.
+        let octets = h.split(separator: ".", omittingEmptySubsequences: false)
+        guard octets.count == 4, octets[0] == "127" else { return false }
+        return octets.allSatisfy { Int($0).map { (0...255).contains($0) } ?? false }
     }
 
     public func beginQueryWindow() -> Window {

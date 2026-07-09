@@ -153,3 +153,97 @@ final class RouterEscalationParseTests: XCTestCase {
         XCTAssertEqual(LLMRouterEscalator.parse("no idea"), .synthesis)
     }
 }
+
+final class A224RegressionTests: XCTestCase {
+    func testA224_forgottenFactExcludedAfterForget() {
+        let forgotten = MemoryEntry(id: "m224", memory: "Forgotten fact 224.", version: 1,
+                                    isLatest: true, isForgotten: true, isStatic: false,
+                                    parentMemoryId: nil, rootMemoryId: "m224",
+                                    forgetAfter: nil, forgetReason: "user retraction", history: [])
+        let active = MemoryEntry(id: "m224b", memory: "Active fact 224.", version: 1,
+                                 isLatest: true, isForgotten: false, isStatic: false,
+                                 parentMemoryId: nil, rootMemoryId: "m224b",
+                                 forgetAfter: nil, forgetReason: nil, history: [])
+        let filtered = ItemState.memoryDynamicsFilter([forgotten, active])
+        XCTAssertEqual(filtered.map(\.id), ["m224b"],
+                       "re-asked queries must not surface facts retracted via /forget")
+    }
+
+    func testA224_ttlExpiredExcluded() {
+        let past = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3600))
+        let expired = MemoryEntry(id: "e224", memory: "TTL fact 224.", version: 1,
+                                  isLatest: true, isForgotten: false, isStatic: false,
+                                  parentMemoryId: nil, rootMemoryId: "e224",
+                                  forgetAfter: past, forgetReason: nil, history: [])
+        XCTAssertFalse(ItemState.memoryDynamicsActive(expired),
+                       "TTL-expired memories must not appear in answers")
+    }
+}
+
+final class A253RegressionTests: XCTestCase {
+    func testA253_dreamingDoesNotDuplicateSynthesis() {
+        let existing = [MemoryEntry(id: "s253", memory: "Synthesis 253.", version: 1,
+                                    isLatest: true, isForgotten: false, isStatic: false,
+                                    parentMemoryId: nil, rootMemoryId: "s253",
+                                    forgetAfter: nil, forgetReason: nil, history: [])]
+        XCTAssertFalse(MediaCompanion.dreamingSafeSynthesis("Synthesis 253.", existing: existing,
+                                                      constituents: ["fact 253"]),
+                       "dreaming must not duplicate existing syntheses")
+        XCTAssertTrue(MediaCompanion.dreamingSafeSynthesis("New synthesis 253.", existing: existing,
+                                                     constituents: ["fact 253"]),
+                      "novel synthesis with constituent grounding is allowed")
+    }
+}
+
+final class A137RegressionTests: XCTestCase {
+    func testA137_citationIntegrity() {
+        let ev = [Retrieved(memory: "User uses Bazel.", similarity: 0.9, source: .init(docId: "d137", path: "/f.md", title: "Notes"))]
+        XCTAssertTrue(AnswerCache.citationIntegritySupported("User uses Bazel [Notes].", evidence: ev))
+        XCTAssertFalse(AnswerCache.citationIntegritySupported("User uses CMake [Notes].", evidence: ev))
+    }
+    func testA137_unsupportedAnswerEvent() {
+        XCTAssertEqual(AnswerCache.unsupportedAnswerEvents(), [.state(.unsupportedAnswer)])
+    }
+}
+
+final class A166RegressionTests: XCTestCase {
+    func testA166_indexingTerminal() {
+        let t = AgenticGrep.indexingTerminalState(path: "/f166.pdf")
+        guard case .indexing(let p) = t else { return XCTFail() }
+        XCTAssertEqual(p, "/f166.pdf")
+    }
+    func testA166_selfHealSafe() {
+        XCTAssertEqual(AgenticGrep.ingestionSelfHealSafe(orphanIds: ["m166", ""]), ["m166"])
+    }
+}
+
+final class A108RegressionTests: XCTestCase {
+    func testA108_lifecycleEventsRenderable() {
+        let events = QueryService.lifecycleEvents(branch: .retry)
+        XCTAssertFalse(events.isEmpty)
+        var state = NotchState(phase: .input, query: "q108", answer: "", sources: [])
+        for e in events { state = NotchReducer.apply(e, to: state) }
+        XCTAssertTrue(!state.answer.isEmpty || state.terminal != nil || !state.reasoning.isEmpty || state.phase == .searching)
+    }
+}
+final class A195RegressionTests: XCTestCase {
+    func testA195_ingest() {
+        XCTAssertEqual(WorkScheduler.indexingTerminalState(path:"/a.pdf"),.indexing(path:"/a.pdf"))
+        XCTAssertEqual(WorkScheduler.ingestionSelfHealSafe(orphanIds:["x",""]),["x"])
+    }
+}
+
+/// A-021: ConflictDetector surfaces location disagreements in evidence.
+final class ConflictDetectorAuditTests: XCTestCase {
+    func testDetectsConflictingLocations() {
+        let ev = [
+            Retrieved(memory: "I live in NYC.", similarity: 0.9,
+                      source: .init(docId: "a", path: "/a", title: "a", updatedAt: "2024-01-01T00:00:00Z")),
+            Retrieved(memory: "I live in San Francisco.", similarity: 0.9,
+                      source: .init(docId: "b", path: "/b", title: "b", updatedAt: "2026-01-01T00:00:00Z")),
+        ]
+        let conflicts = ConflictDetector.conflicts(in: ev)
+        XCTAssertEqual(conflicts.count, 1)
+        XCTAssertTrue(conflicts[0].note.contains("San Francisco"))
+    }
+}

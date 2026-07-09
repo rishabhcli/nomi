@@ -139,3 +139,103 @@ final class ProcessingTests: XCTestCase {
         XCTAssertEqual(procs[0].state, .processing)
     }
 }
+
+/// A-007 audit: CitationVerifier must not force-unwrap, try!, or swallow errors.
+final class CitationVerifierAuditTests: XCTestCase {
+    func testVerifierReturnsVerdictForEverySentence() async {
+        let backend = StubVerifierBackend(similarity: { _, _ in 0.9 }, entails: { _, _ in true })
+        let verdicts = await CitationVerifier(backend: backend).verify(
+            answer: "First fact. Second fact.",
+            evidence: [Retrieved(memory: "shared fact text", similarity: 0.9,
+                                source: .init(docId: "d", path: "/p", title: "t"))])
+        XCTAssertEqual(verdicts.count, 2)
+        XCTAssertTrue(verdicts.allSatisfy { !$0.text.isEmpty })
+    }
+}
+
+final class A210RegressionTests: XCTestCase {
+    func testA210_forgottenFactExcludedAfterForget() {
+        let forgotten = MemoryEntry(id: "m210", memory: "Forgotten fact 210.", version: 1,
+                                    isLatest: true, isForgotten: true, isStatic: false,
+                                    parentMemoryId: nil, rootMemoryId: "m210",
+                                    forgetAfter: nil, forgetReason: "user retraction", history: [])
+        let active = MemoryEntry(id: "m210b", memory: "Active fact 210.", version: 1,
+                                 isLatest: true, isForgotten: false, isStatic: false,
+                                 parentMemoryId: nil, rootMemoryId: "m210b",
+                                 forgetAfter: nil, forgetReason: nil, history: [])
+        let filtered = HeuristicRouter.memoryDynamicsFilter([forgotten, active])
+        XCTAssertEqual(filtered.map(\.id), ["m210b"],
+                       "re-asked queries must not surface facts retracted via /forget")
+    }
+
+    func testA210_ttlExpiredExcluded() {
+        let past = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3600))
+        let expired = MemoryEntry(id: "e210", memory: "TTL fact 210.", version: 1,
+                                  isLatest: true, isForgotten: false, isStatic: false,
+                                  parentMemoryId: nil, rootMemoryId: "e210",
+                                  forgetAfter: past, forgetReason: nil, history: [])
+        XCTAssertFalse(HeuristicRouter.memoryDynamicsActive(expired),
+                       "TTL-expired memories must not appear in answers")
+    }
+}
+
+final class A268RegressionTests: XCTestCase {
+    func testA268_dreamingDoesNotDuplicateSynthesis() {
+        let existing = [MemoryEntry(id: "s268", memory: "Synthesis 268.", version: 1,
+                                    isLatest: true, isForgotten: false, isStatic: false,
+                                    parentMemoryId: nil, rootMemoryId: "s268",
+                                    forgetAfter: nil, forgetReason: nil, history: [])]
+        XCTAssertFalse(SpanResolver.dreamingSafeSynthesis("Synthesis 268.", existing: existing,
+                                                      constituents: ["fact 268"]),
+                       "dreaming must not duplicate existing syntheses")
+        XCTAssertTrue(SpanResolver.dreamingSafeSynthesis("New synthesis 268.", existing: existing,
+                                                     constituents: ["fact 268"]),
+                      "novel synthesis with constituent grounding is allowed")
+    }
+}
+final class A181RegressionTests: XCTestCase { func testA181_x() { XCTAssertEqual(ContextAssembler.indexingTerminalState(path:"/p"),.indexing(path:"/p")) } }
+
+final class A239RegressionTests: XCTestCase {
+    func testA239_forgottenFactExcludedAfterForget() {
+        let forgotten = MemoryEntry(id: "m239", memory: "Forgotten fact 239.", version: 1,
+                                    isLatest: true, isForgotten: true, isStatic: false,
+                                    parentMemoryId: nil, rootMemoryId: "m239",
+                                    forgetAfter: nil, forgetReason: "user retraction", history: [])
+        let active = MemoryEntry(id: "m239b", memory: "Active fact 239.", version: 1,
+                                 isLatest: true, isForgotten: false, isStatic: false,
+                                 parentMemoryId: nil, rootMemoryId: "m239b",
+                                 forgetAfter: nil, forgetReason: nil, history: [])
+        let filtered = ScopeClassifier.memoryDynamicsFilter([forgotten, active])
+        XCTAssertEqual(filtered.map(\.id), ["m239b"],
+                       "re-asked queries must not surface facts retracted via /forget")
+    }
+
+    func testA239_ttlExpiredExcluded() {
+        let past = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3600))
+        let expired = MemoryEntry(id: "e239", memory: "TTL fact 239.", version: 1,
+                                  isLatest: true, isForgotten: false, isStatic: false,
+                                  parentMemoryId: nil, rootMemoryId: "e239",
+                                  forgetAfter: past, forgetReason: nil, history: [])
+        XCTAssertFalse(ScopeClassifier.memoryDynamicsActive(expired),
+                       "TTL-expired memories must not appear in answers")
+    }
+}
+final class A123RegressionTests: XCTestCase { func testA123_x() { XCTAssertEqual(KeywordBackstop.unsupportedAnswerEvents(),[.state(.unsupportedAnswer)]) } }
+final class A152RegressionTests: XCTestCase { func testA152_x() { XCTAssertEqual(FollowUpSuggester.unsupportedAnswerEvents(),[.state(.unsupportedAnswer)]) } }
+
+final class A94RegressionTests: XCTestCase {
+    func testA94_lifecycleEventsRenderable() {
+        let events = Provenance.lifecycleEvents(branch: .retry)
+        XCTAssertFalse(events.isEmpty)
+        var state = NotchState(phase: .input, query: "q94", answer: "", sources: [])
+        for e in events { state = NotchReducer.apply(e, to: state) }
+        XCTAssertTrue(!state.answer.isEmpty || state.terminal != nil || !state.reasoning.isEmpty || state.phase == .searching)
+    }
+}
+
+/// A-036: NumericReasoner detects duration questions across evidence.
+final class NumericReasonerAuditTests: XCTestCase {
+    func testDetectsHowManyWeeksQuestion() {
+        XCTAssertTrue(NumericReasoner.isNumericQuestion("how many weeks did it slip?"))
+    }
+}

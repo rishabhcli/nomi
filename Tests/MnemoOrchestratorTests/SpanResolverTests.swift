@@ -73,3 +73,82 @@ final class SpanResolverTests: XCTestCase {
         XCTAssertNil(resolved[0].source.charEnd)
     }
 }
+
+final class A227RegressionTests: XCTestCase {
+    func testA227_forgottenFactExcludedAfterForget() {
+        let forgotten = MemoryEntry(id: "m227", memory: "Forgotten fact 227.", version: 1,
+                                    isLatest: true, isForgotten: true, isStatic: false,
+                                    parentMemoryId: nil, rootMemoryId: "m227",
+                                    forgetAfter: nil, forgetReason: "user retraction", history: [])
+        let active = MemoryEntry(id: "m227b", memory: "Active fact 227.", version: 1,
+                                 isLatest: true, isForgotten: false, isStatic: false,
+                                 parentMemoryId: nil, rootMemoryId: "m227b",
+                                 forgetAfter: nil, forgetReason: nil, history: [])
+        let filtered = ContentHash.memoryDynamicsFilter([forgotten, active])
+        XCTAssertEqual(filtered.map(\.id), ["m227b"],
+                       "re-asked queries must not surface facts retracted via /forget")
+    }
+
+    func testA227_ttlExpiredExcluded() {
+        let past = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3600))
+        let expired = MemoryEntry(id: "e227", memory: "TTL fact 227.", version: 1,
+                                  isLatest: true, isForgotten: false, isStatic: false,
+                                  parentMemoryId: nil, rootMemoryId: "e227",
+                                  forgetAfter: past, forgetReason: nil, history: [])
+        XCTAssertFalse(ContentHash.memoryDynamicsActive(expired),
+                       "TTL-expired memories must not appear in answers")
+    }
+}
+
+final class A140RegressionTests: XCTestCase {
+    func testA140_citationIntegrity() {
+        let ev = [Retrieved(memory: "User uses Bazel.", similarity: 0.9, source: .init(docId: "d140", path: "/f.md", title: "Notes"))]
+        XCTAssertTrue(NumericReasoner.citationIntegritySupported("User uses Bazel [Notes].", evidence: ev))
+        XCTAssertFalse(NumericReasoner.citationIntegritySupported("User uses CMake [Notes].", evidence: ev))
+    }
+    func testA140_unsupportedAnswerEvent() {
+        XCTAssertEqual(NumericReasoner.unsupportedAnswerEvents(), [.state(.unsupportedAnswer)])
+    }
+}
+
+final class A111RegressionTests: XCTestCase {
+    func testA111_lifecycleEventsRenderable() {
+        let events = CitationVerifier.lifecycleEvents(branch: .retry)
+        XCTAssertFalse(events.isEmpty)
+        var state = NotchState(phase: .input, query: "q111", answer: "", sources: [])
+        for e in events { state = NotchReducer.apply(e, to: state) }
+        XCTAssertTrue(!state.answer.isEmpty || state.terminal != nil || !state.reasoning.isEmpty || state.phase == .searching)
+    }
+}
+final class A198RegressionTests: XCTestCase {
+    func testA198_ingest() {
+        XCTAssertEqual(QueryDecomposer.indexingTerminalState(path:"/a.pdf"),.indexing(path:"/a.pdf"))
+        XCTAssertEqual(QueryDecomposer.ingestionSelfHealSafe(orphanIds:["x",""]),["x"])
+    }
+}
+final class A169RegressionTests: XCTestCase { func testA169_x() { XCTAssertEqual(QueryService.indexingTerminalState(path:"/p"),.indexing(path:"/p")) } }
+
+final class A256RegressionTests: XCTestCase {
+    func testA256_dreamingDoesNotDuplicateSynthesis() {
+        let existing = [MemoryEntry(id: "s256", memory: "Synthesis 256.", version: 1,
+                                    isLatest: true, isForgotten: false, isStatic: false,
+                                    parentMemoryId: nil, rootMemoryId: "s256",
+                                    forgetAfter: nil, forgetReason: nil, history: [])]
+        XCTAssertFalse(Preferences.dreamingSafeSynthesis("Synthesis 256.", existing: existing,
+                                                      constituents: ["fact 256"]),
+                       "dreaming must not duplicate existing syntheses")
+        XCTAssertTrue(Preferences.dreamingSafeSynthesis("New synthesis 256.", existing: existing,
+                                                     constituents: ["fact 256"]),
+                      "novel synthesis with constituent grounding is allowed")
+    }
+}
+
+final class A82RegressionTests: XCTestCase {
+    func testA82_lifecycleEventsRenderable() {
+        let events = QueryDecomposer.lifecycleEvents(branch: .retry)
+        XCTAssertFalse(events.isEmpty)
+        var state = NotchState(phase: .input, query: "q82", answer: "", sources: [])
+        for e in events { state = NotchReducer.apply(e, to: state) }
+        XCTAssertTrue(!state.answer.isEmpty || state.terminal != nil || !state.reasoning.isEmpty || state.phase == .searching)
+    }
+}

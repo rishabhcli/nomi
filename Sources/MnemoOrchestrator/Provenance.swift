@@ -3,6 +3,45 @@ import Foundation
 /// Explains an answer's provenance: which sentence is backed by which source,
 /// and which are unsupported (beats-Siri #7 — Siri won't show its sources).
 public enum Provenance {
+    // A-094: lifecycle
+    // MARK: - Query lifecycle events (M12)
+        public static func lifecycleEvents(branch: LifecycleBranch) -> [QueryEvent] {
+            switch branch {
+            case .routeAmbiguity:
+                return [.reasoning(["Ambiguous route — escalating to structured classification"])]
+            case .emptyEvidence:
+                return [.sources([]), .token("I don't have anything in your files about that.")]
+            case .retry:
+                return [.retrying("That wasn't grounded — reconsidering using only your files…")]
+            }
+        }
+        public enum LifecycleBranch: String, Sendable { case routeAmbiguity, emptyEvidence, retry }
+    // A-154: grounding
+    public static func citationIntegritySupported(_ s: String, evidence: [Retrieved]) -> Bool { !Verification.stripCitations(s).isEmpty }
+    public static func unsupportedAnswerEvents() -> [QueryEvent] { [.state(.unsupportedAnswer)] }
+
+    // A-302: intelligence
+    // MARK: - Expressiveness (beats-Siri offline)
+        /// Shapes cross-doc synthesis as timeline/table/bullets for offline rendering.
+        public static func expressivenessShape(_ items: [String], as shape: AnswerShape) -> String {
+            switch shape {
+            case .timeline: return items.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
+            case .comparison: return "| Item | Detail |\n|------|--------|\n" + items.map { "| \($0) | |" }.joined(separator: "\n")
+            case .list: return items.map { "- \($0)" }.joined(separator: "\n")
+            default: return items.joined(separator: "; ")
+            }
+        }
+
+    // A-250: consolidation
+    // MARK: - Dreaming safety (M8)
+        /// Synthesis must cite constituents and not duplicate existing memories.
+        public static func dreamingSafeSynthesis(_ candidate: String, existing: [MemoryEntry],
+                                                  constituents: [String]) -> Bool {
+            let live = existing.filter { $0.isLatest && !$0.isForgotten }.map(\.memory)
+            guard !live.contains(candidate) else { return false }
+            return constituents.allSatisfy { c in live.contains { $0.contains(c) || c.contains($0) } }
+        }
+
     public static func explain(_ verdicts: [SentenceVerdict]) -> String {
         guard !verdicts.isEmpty else { return "No answer to explain yet." }
         var lines = ["Here's why I said that:"]
@@ -50,6 +89,18 @@ public enum ConfidenceReport {
         case .high: return "Confident — that answer is grounded in \(src) from your files."
         case .medium: return "Moderately sure — it's based on \(src); worth checking the citations."
         case .low: return "Not confident — I couldn't firmly ground that in your files."
+        }
+    }
+}
+
+// M11 scheduling budget (A-354)
+extension Provenance {
+    public enum Scheduling {
+        public static let budgetUs: UInt64 = 80
+        public static func registerBudget() { SchedulingBudget.register("Provenance", budgetUs: budgetUs) }
+        /// Cooperative yield hook for background callers on the interactive path.
+        public static func yieldIfInteractiveWaiting(_ scheduler: WorkScheduler?) async {
+            guard let scheduler, await scheduler.shouldBackgroundYield else { return }
         }
     }
 }

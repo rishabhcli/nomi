@@ -37,4 +37,20 @@ final class ConfigTests: XCTestCase {
     func testMissingKeyThrows() {
         XCTAssertThrowsError(try MnemoConfig.load(from: "[engine]\nbyom = \"ollama\"\n"))
     }
+
+    func testBenchSampleSizeDefault() throws {
+        let c = try MnemoConfig.load(from: Self.sample)
+        XCTAssertEqual(c.bench.sampleSize, 4)
+    }
+
+    func testDreamingIntervalParsed() throws {
+        let text = Self.sample + "\n[dreaming]\ninterval = \"12h\"\n"
+        let c = try MnemoConfig.load(from: text)
+        XCTAssertEqual(c.dreaming.intervalHours, 12)
+    }
+
+    func testInvalidBenchSampleSizeRejected() throws {
+        let text = Self.sample + "\n[bench]\nsample_size = 0\n"
+        XCTAssertThrowsError(try MnemoConfig.load(from: text).validateInvariant())
+    }
 }

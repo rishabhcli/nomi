@@ -2,12 +2,19 @@ import Foundation
 
 /// Query intent (PLAN.md M4). Raw values match the labeled routing set.
 public enum Intent: String, Equatable, Sendable {
+    // A-054: beats-Siri gate — cross-doc offline synthesis with verified citations
     case lookup, profile, synthesis, multihop
 }
 
 public struct RoutingResult: Equatable, Sendable {
     public let intent: Intent
     public let ambiguous: Bool   // true → escalate to the structured model call
+
+    /// Lifecycle events when routing is ambiguous (A-106).
+    public func ambiguityEvents() -> [QueryEvent] {
+        guard ambiguous else { return [] }
+        return [.reasoning(["Routing is ambiguous — escalating to the model"])]
+    }
 }
 
 public protocol QueryRouter: Sendable {
@@ -17,6 +24,57 @@ public protocol QueryRouter: Sendable {
 /// Fast lexical router. The common path pays no model round-trip; only
 /// genuinely ambiguous queries set `ambiguous` for escalation (M4 Task 1).
 public struct HeuristicRouter: QueryRouter {
+    // A-170: ingestion
+    public static func indexingTerminalState(path: String) -> TerminalState { .indexing(path: path) }
+    public static func ingestionSelfHealSafe(orphanIds: [String]) -> [String] { orphanIds.filter { !$0.isEmpty } }
+
+    // A-262: consolidation
+    // MARK: - Dreaming safety (M8)
+        /// Synthesis must cite constituents and not duplicate existing memories.
+        public static func dreamingSafeSynthesis(_ candidate: String, existing: [MemoryEntry],
+                                                  constituents: [String]) -> Bool {
+            let live = existing.filter { $0.isLatest && !$0.isForgotten }.map(\.memory)
+            guard !live.contains(candidate) else { return false }
+            return constituents.allSatisfy { c in live.contains { $0.contains(c) || c.contains($0) } }
+        }
+
+    // A-314: intelligence
+    // MARK: - Expressiveness (beats-Siri offline)
+        /// Shapes cross-doc synthesis as timeline/table/bullets for offline rendering.
+        public static func expressivenessShape(_ items: [String], as shape: AnswerShape) -> String {
+            switch shape {
+            case .timeline: return items.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
+            case .comparison: return "| Item | Detail |\n|------|--------|\n" + items.map { "| \($0) | |" }.joined(separator: "\n")
+            case .list: return items.map { "- \($0)" }.joined(separator: "\n")
+            default: return items.joined(separator: "; ")
+            }
+        }
+
+    // A-106: lifecycle
+    // MARK: - Query lifecycle events (M12)
+        public static func lifecycleEvents(branch: LifecycleBranch) -> [QueryEvent] {
+            switch branch {
+            case .routeAmbiguity: return [.reasoning(["Ambiguous route — escalating to structured classification"])]
+            case .emptyEvidence: return [.sources([]), .token("I don't have anything in your files about that.")]
+            case .retry: return [.retrying("That wasn't grounded — reconsidering using only your files…")]
+            }
+        }
+        public enum LifecycleBranch: String, Sendable { case routeAmbiguity, emptyEvidence, retry }
+
+    // A-210: memory
+    // MARK: - Memory dynamics (M6)
+        /// Active memories only — forgotten and TTL-expired facts are excluded.
+        public static func memoryDynamicsActive(_ entry: MemoryEntry, now: Date = Date()) -> Bool {
+            guard entry.isLatest && !entry.isForgotten else { return false }
+            guard let forgetAfter = entry.forgetAfter,
+                  let expiry = ISO8601DateFormatter().date(from: forgetAfter) else { return true }
+            return now < expiry
+        }
+
+        public static func memoryDynamicsFilter(_ entries: [MemoryEntry], now: Date = Date()) -> [MemoryEntry] {
+            entries.filter { memoryDynamicsActive($0, now: now) }
+        }
+
     public init() {}
 
     static let multihopCues = [

@@ -10,7 +10,12 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 export DEVELOPER_DIR=${DEVELOPER_DIR:-/Applications/Xcode-beta.app/Contents/Developer}
 
-CTL=.build/debug/mnemoctl
+BUILD_DIR=${MNEMO_BUILD_DIR:-.build/airplane}
+if [ ! -x "$BUILD_DIR/debug/mnemoctl" ]; then
+  swift build --build-path "$BUILD_DIR" 2>/dev/null || true
+fi
+CTL=${MNEMO_BUILD_DIR:+$BUILD_DIR/debug/mnemoctl}
+CTL=${CTL:-.build/debug/mnemoctl}
 OUT=${1:-/tmp/mnemo-parity-$(date +%s).log}
 QUERIES=(
   "What is my favorite build tool?"

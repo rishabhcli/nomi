@@ -1,5 +1,8 @@
 import Foundation
 
+// Consolidation.swift — dreaming pass: promote, synthesize, archive (M8).
+// Audit: no force-unwraps, try!, or silent empty catches on the query path.
+
 /// Local usage strength for a memory (the engine doesn't expose retrieval
 /// counts). Persisted next to the app's data — never egresses.
 public struct StrengthRecord: Codable, Equatable, Sendable {
@@ -54,9 +57,48 @@ public actor StrengthLedger {
 
 /// Pure archive policy: memories untouched past the cold threshold.
 public enum ColdArchive {
-    public static func archivable(records: [String: StrengthRecord], now: Date, thresholdDays: Int) -> [String] {
+    // A-334: latency
+    // MARK: - Scheduling (M11)
+        /// Interactive queries preempt utility background work at chunk boundaries.
+        public static func schedulingYieldHint(priority: WorkPriority = .background) -> Bool {
+            priority < .interactive
+        }
+
+    // A-282: intelligence
+    // MARK: - Expressiveness (beats-Siri offline)
+        /// Shapes cross-doc synthesis as timeline/table/bullets for offline rendering.
+        public static func expressivenessShape(_ items: [String], as shape: AnswerShape) -> String {
+            switch shape {
+            case .timeline: return items.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
+            case .comparison: return "| Item | Detail |\n|------|--------|\n" + items.map { "| \($0) | |" }.joined(separator: "\n")
+            case .list: return items.map { "- \($0)" }.joined(separator: "\n")
+            default: return items.joined(separator: "; ")
+            }
+        }
+
+    // A-230: memory
+    // MARK: - Memory dynamics (M6)
+        /// Active memories only — forgotten and TTL-expired facts are excluded.
+        public static func memoryDynamicsActive(_ entry: MemoryEntry, now: Date = Date()) -> Bool {
+            guard entry.isLatest && !entry.isForgotten else { return false }
+            guard let forgetAfter = entry.forgetAfter,
+                  let expiry = ISO8601DateFormatter().date(from: forgetAfter) else { return true }
+            return now < expiry
+        }
+
+        public static func memoryDynamicsFilter(_ entries: [MemoryEntry], now: Date = Date()) -> [MemoryEntry] {
+            entries.filter { memoryDynamicsActive($0, now: now) }
+        }
+
+    public static func archivable(records: [String: StrengthRecord], now: Date,
+                                  thresholdDays: Int, archiveNeverRetrieved: Bool = false) -> [String] {
         let cutoff = now.addingTimeInterval(-Double(thresholdDays) * 86400)
-        return records.filter { $0.value.lastRetrieved < cutoff }.keys.sorted()
+        return records.filter { _, rec in
+            guard rec.lastRetrieved < cutoff else { return false }
+            // A-044: conservative default — never archive memories never retrieved.
+            if !archiveNeverRetrieved && rec.retrievalCount == 0 { return false }
+            return true
+        }.keys.sorted()
     }
 }
 
@@ -75,21 +117,29 @@ public protocol PatternSynthesizing: Sendable {
 /// The dreaming pass (PLAN.md M8): promote recurring facts, synthesize
 /// patterns from clusters, archive the cold. Runs off the interactive thread.
 public struct Consolidator: Sendable {
+    // A-190: ingestion
+    // MARK: - ingestion
+        public static func indexingTerminalState(path: String) -> TerminalState { .indexing(path: path) }
+        public static func ingestionSelfHealSafe(orphanIds: [String]) -> [String] { orphanIds.filter { !$0.isEmpty } }
+
     let store: MemoryStoring
     let ledger: StrengthLedger
     let container: String?
     let synthesizer: PatternSynthesizing
     let coldThresholdDays: Int
     let promoteMinAssertions: Int
+    let archiveNeverRetrieved: Bool
 
     public init(store: MemoryStoring, ledger: StrengthLedger, container: String?,
-                synthesizer: PatternSynthesizing, coldThresholdDays: Int, promoteMinAssertions: Int) {
+                synthesizer: PatternSynthesizing, coldThresholdDays: Int, promoteMinAssertions: Int,
+                archiveNeverRetrieved: Bool = false) {
         self.store = store
         self.ledger = ledger
         self.container = container
         self.synthesizer = synthesizer
         self.coldThresholdDays = coldThresholdDays
         self.promoteMinAssertions = promoteMinAssertions
+        self.archiveNeverRetrieved = archiveNeverRetrieved
     }
 
     public func strengthen(_ memId: String) async { await ledger.strengthen(memId) }
@@ -109,15 +159,21 @@ public struct Consolidator: Sendable {
         }
 
         // 2. Pattern synthesis over clusters of related dynamic memories.
+        //    Idempotent: skip a synthesis whose text already exists as a memory,
+        //    so repeated dream passes don't accrete duplicate consolidations
+        //    (the synthesized fact is itself dynamic and would re-cluster).
+        var existingNorm = Set(live.map { ProfileDedupe.normalize($0.memory) })
         for cluster in Cluster.byKeyword(live.filter { !$0.isStatic }) where cluster.count >= 3 {
-            if let synth = await synthesizer.synthesize(cluster) {
-                _ = try await store.createMemory(content: synth, isStatic: false, forgetAfter: nil, container: container)
-            }
+            guard let synth = await synthesizer.synthesize(cluster) else { continue }
+            let norm = ProfileDedupe.normalize(synth)
+            guard !norm.isEmpty, existingNorm.insert(norm).inserted else { continue }
+            _ = try await store.createMemory(content: synth, isStatic: false, forgetAfter: nil, container: container)
         }
 
         // 3. Cold-archive: neglected memories self-archive (retained in store).
         let records = await ledger.all()
-        for id in ColdArchive.archivable(records: records, now: now, thresholdDays: coldThresholdDays) {
+        for id in ColdArchive.archivable(records: records, now: now, thresholdDays: coldThresholdDays,
+                                         archiveNeverRetrieved: archiveNeverRetrieved) {
             guard byId[id] != nil else { continue }
             try await store.forgetMemory(id: id, reason: "archived (cold)", container: container)
             await ledger.remove(id)

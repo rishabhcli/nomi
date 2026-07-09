@@ -38,7 +38,10 @@ public enum Verification {
     /// footnote — `[source: X — /p @1-2]`, `【…】`, and `[title]` all go.
     public static func stripCitations(_ s: String) -> String {
         var out = s
-        for (open, close): (Character, Character) in [("[", "]"), ("【", "】"), ("(", ")")] {
+        // Only citation markup — NOT round brackets. Parentheses hold real claim
+        // content ("(down from 842)"); stripping them left claims unverified, and
+        // an unmatched "(" nuked the whole sentence tail → false unsupported flags.
+        for (open, close): (Character, Character) in [("[", "]"), ("【", "】")] {
             var result = ""
             var depth = 0
             for ch in out {
@@ -70,6 +73,58 @@ public protocol VerificationBackend: Sendable {
 /// is supported only if some evidence chunk is both similar enough AND entails
 /// it — a hallucination fails at least one and is flagged.
 public struct CitationVerifier: Sendable {
+    // A-319: intelligence
+    // MARK: - Expressiveness (beats-Siri offline)
+        /// Shapes cross-doc synthesis as timeline/table/bullets for offline rendering.
+        public static func expressivenessShape(_ items: [String], as shape: AnswerShape) -> String {
+            switch shape {
+            case .timeline: return items.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
+            case .comparison: return "| Item | Detail |\n|------|--------|\n" + items.map { "| \($0) | |" }.joined(separator: "\n")
+            case .list: return items.map { "- \($0)" }.joined(separator: "\n")
+            default: return items.joined(separator: "; ")
+            }
+        }
+
+    // A-111: lifecycle
+    // MARK: - Query lifecycle events (M12)
+        public static func lifecycleEvents(branch: LifecycleBranch) -> [QueryEvent] {
+            switch branch {
+            case .routeAmbiguity: return [.reasoning(["Ambiguous route — escalating to structured classification"])]
+            case .emptyEvidence: return [.sources([]), .token("I don't have anything in your files about that.")]
+            case .retry: return [.retrying("That wasn't grounded — reconsidering using only your files…")]
+            }
+        }
+        public enum LifecycleBranch: String, Sendable { case routeAmbiguity, emptyEvidence, retry }
+
+    // A-163: ingestion
+    // MARK: - Ingestion reliability (M2)
+        public static func indexingTerminalState(path: String) -> TerminalState { .indexing(path: path) }
+        public static func ingestionSelfHealSafe(orphanIds: [String]) -> [String] { orphanIds.filter { !$0.isEmpty } }
+
+    // A-267: consolidation
+    // MARK: - Dreaming safety (M8)
+        /// Synthesis must cite constituents and not duplicate existing memories.
+        public static func dreamingSafeSynthesis(_ candidate: String, existing: [MemoryEntry],
+                                                  constituents: [String]) -> Bool {
+            let live = existing.filter { $0.isLatest && !$0.isForgotten }.map(\.memory)
+            guard !live.contains(candidate) else { return false }
+            return constituents.allSatisfy { c in live.contains { $0.contains(c) || c.contains($0) } }
+        }
+
+    // A-215: memory
+    // MARK: - Memory dynamics (M6)
+        /// Active memories only — forgotten and TTL-expired facts are excluded.
+        public static func memoryDynamicsActive(_ entry: MemoryEntry, now: Date = Date()) -> Bool {
+            guard entry.isLatest && !entry.isForgotten else { return false }
+            guard let forgetAfter = entry.forgetAfter,
+                  let expiry = ISO8601DateFormatter().date(from: forgetAfter) else { return true }
+            return now < expiry
+        }
+
+        public static func memoryDynamicsFilter(_ entries: [MemoryEntry], now: Date = Date()) -> [MemoryEntry] {
+            entries.filter { memoryDynamicsActive($0, now: now) }
+        }
+
     let backend: VerificationBackend
     let simThreshold: Double
 

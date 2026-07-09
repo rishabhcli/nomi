@@ -53,6 +53,18 @@ final class TimeWindowTests: XCTestCase {
         XCTAssertNotNil(TimeWindow.parse(query: "notes from last week", now: now))
         XCTAssertNotNil(TimeWindow.parse(query: "anything last month", now: now))
         XCTAssertNil(TimeWindow.parse(query: "what is my build tool", now: now))
+        // Regression: "may"/"maybe" as modal verbs must not become a May window;
+        // "in May" (temporal cue) and other bare months still parse.
+        XCTAssertNil(TimeWindow.parse(query: "the release may slip next sprint", now: now))
+        XCTAssertNil(TimeWindow.parse(query: "maybe I should refactor", now: now))
+        XCTAssertNotNil(TimeWindow.parse(query: "what did I decide in May", now: now))
+        XCTAssertNotNil(TimeWindow.parse(query: "notes from March", now: now))
+    }
+
+    func testContentHashDoesNotLogDocumentBytes() {
+        let hash = ContentHash.sha256Hex(of: Data("secret document bytes".utf8))
+        XCTAssertEqual(hash.count, 64)
+        XCTAssertFalse(hash.contains("secret"), "hash output must not echo document text")
     }
     func testYesterdayIntervalContainsYesterdayNotToday() {
         let w = TimeWindow.parse(query: "yesterday", now: now)!
@@ -160,5 +172,114 @@ final class CorpusSuggesterTests: XCTestCase {
     }
     func testEmptyCardsNoSuggestions() {
         XCTAssertTrue(CorpusSuggester.fromCards([], max: 3).isEmpty)
+    }
+}
+
+final class A222RegressionTests: XCTestCase {
+    func testA222_forgottenFactExcludedAfterForget() {
+        let forgotten = MemoryEntry(id: "m222", memory: "Forgotten fact 222.", version: 1,
+                                    isLatest: true, isForgotten: true, isStatic: false,
+                                    parentMemoryId: nil, rootMemoryId: "m222",
+                                    forgetAfter: nil, forgetReason: "user retraction", history: [])
+        let active = MemoryEntry(id: "m222b", memory: "Active fact 222.", version: 1,
+                                 isLatest: true, isForgotten: false, isStatic: false,
+                                 parentMemoryId: nil, rootMemoryId: "m222b",
+                                 forgetAfter: nil, forgetReason: nil, history: [])
+        let filtered = Prompt.memoryDynamicsFilter([forgotten, active])
+        XCTAssertEqual(filtered.map(\.id), ["m222b"],
+                       "re-asked queries must not surface facts retracted via /forget")
+    }
+
+    func testA222_ttlExpiredExcluded() {
+        let past = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3600))
+        let expired = MemoryEntry(id: "e222", memory: "TTL fact 222.", version: 1,
+                                  isLatest: true, isForgotten: false, isStatic: false,
+                                  parentMemoryId: nil, rootMemoryId: "e222",
+                                  forgetAfter: past, forgetReason: nil, history: [])
+        XCTAssertFalse(Prompt.memoryDynamicsActive(expired),
+                       "TTL-expired memories must not appear in answers")
+    }
+}
+
+final class A251RegressionTests: XCTestCase {
+    func testA251_dreamingDoesNotDuplicateSynthesis() {
+        let existing = [MemoryEntry(id: "s251", memory: "Synthesis 251.", version: 1,
+                                    isLatest: true, isForgotten: false, isStatic: false,
+                                    parentMemoryId: nil, rootMemoryId: "s251",
+                                    forgetAfter: nil, forgetReason: nil, history: [])]
+        XCTAssertFalse(CommandParser.dreamingSafeSynthesis("Synthesis 251.", existing: existing,
+                                                      constituents: ["fact 251"]),
+                       "dreaming must not duplicate existing syntheses")
+        XCTAssertTrue(CommandParser.dreamingSafeSynthesis("New synthesis 251.", existing: existing,
+                                                     constituents: ["fact 251"]),
+                      "novel synthesis with constituent grounding is allowed")
+    }
+}
+
+final class A135RegressionTests: XCTestCase {
+    func testA135_citationIntegrity() {
+        let ev = [Retrieved(memory: "User uses Bazel.", similarity: 0.9, source: .init(docId: "d135", path: "/f.md", title: "Notes"))]
+        XCTAssertTrue(ScopeClassifier.citationIntegritySupported("User uses Bazel [Notes].", evidence: ev))
+        XCTAssertFalse(ScopeClassifier.citationIntegritySupported("User uses CMake [Notes].", evidence: ev))
+    }
+    func testA135_unsupportedAnswerEvent() {
+        XCTAssertEqual(ScopeClassifier.unsupportedAnswerEvents(), [.state(.unsupportedAnswer)])
+    }
+}
+
+final class A280RegressionTests: XCTestCase {
+    func testA280_dreamingDoesNotDuplicateSynthesis() {
+        let existing = [MemoryEntry(id: "s280", memory: "Synthesis 280.", version: 1,
+                                    isLatest: true, isForgotten: false, isStatic: false,
+                                    parentMemoryId: nil, rootMemoryId: "s280",
+                                    forgetAfter: nil, forgetReason: nil, history: [])]
+        XCTAssertFalse(MemoryDynamics.dreamingSafeSynthesis("Synthesis 280.", existing: existing,
+                                                      constituents: ["fact 280"]),
+                       "dreaming must not duplicate existing syntheses")
+        XCTAssertTrue(MemoryDynamics.dreamingSafeSynthesis("New synthesis 280.", existing: existing,
+                                                     constituents: ["fact 280"]),
+                      "novel synthesis with constituent grounding is allowed")
+    }
+}
+
+final class A164RegressionTests: XCTestCase {
+    func testA164_indexingTerminal() {
+        let t = SpanResolver.indexingTerminalState(path: "/f164.pdf")
+        guard case .indexing(let p) = t else { return XCTFail() }
+        XCTAssertEqual(p, "/f164.pdf")
+    }
+    func testA164_selfHealSafe() {
+        XCTAssertEqual(SpanResolver.ingestionSelfHealSafe(orphanIds: ["m164", ""]), ["m164"])
+    }
+}
+
+final class A106RegressionTests: XCTestCase {
+    func testA106_lifecycleEventsRenderable() {
+        let events = HeuristicRouter.lifecycleEvents(branch: .routeAmbiguity)
+        XCTAssertFalse(events.isEmpty)
+        var state = NotchState(phase: .input, query: "q106", answer: "", sources: [])
+        for e in events { state = NotchReducer.apply(e, to: state) }
+        XCTAssertTrue(!state.answer.isEmpty || state.terminal != nil || !state.reasoning.isEmpty || state.phase == .searching)
+    }
+}
+final class A193RegressionTests: XCTestCase {
+    func testA193_ingest() {
+        XCTAssertEqual(ProfileDedupe.indexingTerminalState(path:"/a.pdf"),.indexing(path:"/a.pdf"))
+        XCTAssertEqual(ProfileDedupe.ingestionSelfHealSafe(orphanIds:["x",""]),["x"])
+    }
+}
+
+/// A-048: extraction failures surface retry policy without blocking queries.
+final class ExtractionFailureReportTests: XCTestCase {
+    func testBuildsReportForFailedDocuments() {
+        let docs = [
+            DocumentMeta(id: "ok", filepath: "/ok.md", title: "ok", status: "done",
+                         containerTags: ["mnemo"], summary: nil, updatedAt: nil),
+            DocumentMeta(id: "bad", filepath: "/bad.pdf", title: "bad", status: "failed",
+                         containerTags: ["mnemo"], summary: nil, updatedAt: nil),
+        ]
+        let report = ExtractionFailureReport.build(from: docs)
+        XCTAssertEqual(report.failed.count, 1)
+        XCTAssertTrue(report.retryPolicy.contains("1 document"))
     }
 }

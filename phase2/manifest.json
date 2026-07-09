@@ -1,0 +1,433 @@
+{
+  "phase": 2,
+  "agents": [
+    {
+      "id": "D",
+      "slug": "agent-d-backend",
+      "prompts": [
+        {
+          "n": 1,
+          "file": "0001.md",
+          "title": "QueryService: property-based invariants"
+        },
+        {
+          "n": 2,
+          "file": "0002.md",
+          "title": "Router: concurrency stress under WorkScheduler"
+        },
+        {
+          "n": 3,
+          "file": "0003.md",
+          "title": "RouterEscalator: char-span fuzzing"
+        },
+        {
+          "n": 100,
+          "file": "0100.md",
+          "title": "Coverage: mnemoctl JSON schema stability"
+        },
+        {
+          "n": 200,
+          "file": "0200.md",
+          "title": "Digest: mnemoctl JSON schema stability"
+        },
+        {
+          "n": 300,
+          "file": "0300.md",
+          "title": "MediaCompanion: mnemoctl JSON schema stability"
+        },
+        {
+          "n": 400,
+          "file": "0400.md",
+          "title": "CommandParser: mnemoctl JSON schema stability"
+        },
+        {
+          "n": 500,
+          "file": "0500.md",
+          "title": "Confidence: mnemoctl JSON schema stability"
+        },
+        {
+          "n": 600,
+          "file": "0600.md",
+          "title": "ResponseStyle: mnemoctl JSON schema stability"
+        },
+        {
+          "n": 700,
+          "file": "0700.md",
+          "title": "TimeWindow: mnemoctl JSON schema stability"
+        },
+        {
+          "n": 800,
+          "file": "0800.md",
+          "title": "PersonalRanker: mnemoctl JSON schema stability"
+        },
+        {
+          "n": 900,
+          "file": "0900.md",
+          "title": "AnswerCache: mnemoctl JSON schema stability"
+        },
+        {
+          "n": 1000,
+          "file": "1000.md",
+          "title": "ScopeClassifier: mnemoctl JSON schema stability"
+        }
+      ]
+    },
+    {
+      "id": "E",
+      "slug": "agent-e-frontend",
+      "prompts": [
+        {
+          "n": 1,
+          "file": "0001.md",
+          "title": "NotchSurfaceView: excel at perceived latency"
+        },
+        {
+          "n": 2,
+          "file": "0002.md",
+          "title": "SurfaceBlocks: excel at reading-grade typography"
+        },
+        {
+          "n": 3,
+          "file": "0003.md",
+          "title": "ReasoningTraceView: excel at citation affordance"
+        },
+        {
+          "n": 100,
+          "file": "0100.md",
+          "title": "Increase Contrast glass: excel at error recovery clarity"
+        },
+        {
+          "n": 200,
+          "file": "0200.md",
+          "title": "Increase Contrast glass: excel at reasoning trace legibility"
+        },
+        {
+          "n": 300,
+          "file": "0300.md",
+          "title": "Increase Contrast glass: excel at empty corpus onboarding"
+        },
+        {
+          "n": 400,
+          "file": "0400.md",
+          "title": "Increase Contrast glass: excel at entity chip exploration"
+        },
+        {
+          "n": 500,
+          "file": "0500.md",
+          "title": "Increase Contrast glass: excel at error recovery clarity"
+        },
+        {
+          "n": 600,
+          "file": "0600.md",
+          "title": "Increase Contrast glass: excel at reasoning trace legibility"
+        },
+        {
+          "n": 700,
+          "file": "0700.md",
+          "title": "Increase Contrast glass: excel at empty corpus onboarding"
+        },
+        {
+          "n": 800,
+          "file": "0800.md",
+          "title": "Increase Contrast glass: excel at entity chip exploration"
+        },
+        {
+          "n": 900,
+          "file": "0900.md",
+          "title": "Increase Contrast glass: excel at error recovery clarity"
+        },
+        {
+          "n": 1000,
+          "file": "1000.md",
+          "title": "Increase Contrast glass: excel at reasoning trace legibility"
+        }
+      ]
+    },
+    {
+      "id": "F",
+      "slug": "agent-f-platform",
+      "prompts": [
+        {
+          "n": 1,
+          "file": "0001.md",
+          "title": "Platform: StructuredLog wiring"
+        },
+        {
+          "n": 2,
+          "file": "0002.md",
+          "title": "Platform: MnemoConfig fail-closed"
+        },
+        {
+          "n": 3,
+          "file": "0003.md",
+          "title": "Platform: LoopbackAudit completeness"
+        },
+        {
+          "n": 100,
+          "file": "0100.md",
+          "title": "Platform: first_token_ms regression gate"
+        },
+        {
+          "n": 200,
+          "file": "0200.md",
+          "title": "Platform: Ollama warmup SLO"
+        },
+        {
+          "n": 300,
+          "file": "0300.md",
+          "title": "Platform: supervisor log aggregation"
+        },
+        {
+          "n": 400,
+          "file": "0400.md",
+          "title": "Platform: first_token_ms regression gate"
+        },
+        {
+          "n": 500,
+          "file": "0500.md",
+          "title": "Platform: Ollama warmup SLO"
+        },
+        {
+          "n": 600,
+          "file": "0600.md",
+          "title": "Platform: supervisor log aggregation"
+        },
+        {
+          "n": 700,
+          "file": "0700.md",
+          "title": "Platform: first_token_ms regression gate"
+        },
+        {
+          "n": 800,
+          "file": "0800.md",
+          "title": "Platform: Ollama warmup SLO"
+        },
+        {
+          "n": 900,
+          "file": "0900.md",
+          "title": "Platform: supervisor log aggregation"
+        },
+        {
+          "n": 1000,
+          "file": "1000.md",
+          "title": "Platform: first_token_ms regression gate"
+        }
+      ]
+    },
+    {
+      "id": "G",
+      "slug": "agent-g-quality",
+      "prompts": [
+        {
+          "n": 1,
+          "file": "0001.md",
+          "title": "QA: mutation testing mindset on EvidenceGathering"
+        },
+        {
+          "n": 2,
+          "file": "0002.md",
+          "title": "QA: regression fixture expansion on CitationVerifier"
+        },
+        {
+          "n": 3,
+          "file": "0003.md",
+          "title": "QA: BS-M12 transcript audit on AgenticGrep"
+        },
+        {
+          "n": 100,
+          "file": "0100.md",
+          "title": "QA: invariant property tests on LocalExtractor"
+        },
+        {
+          "n": 200,
+          "file": "0200.md",
+          "title": "QA: force-unwrap elimination on FollowUp"
+        },
+        {
+          "n": 300,
+          "file": "0300.md",
+          "title": "QA: document error rate tracking on QueryHistory"
+        },
+        {
+          "n": 400,
+          "file": "0400.md",
+          "title": "QA: invariant property tests on NotchReducer"
+        },
+        {
+          "n": 500,
+          "file": "0500.md",
+          "title": "QA: force-unwrap elimination on Consolidation"
+        },
+        {
+          "n": 600,
+          "file": "0600.md",
+          "title": "QA: document error rate tracking on Ingestion"
+        },
+        {
+          "n": 700,
+          "file": "0700.md",
+          "title": "QA: invariant property tests on AgenticGrep"
+        },
+        {
+          "n": 800,
+          "file": "0800.md",
+          "title": "QA: force-unwrap elimination on EvidenceGathering"
+        },
+        {
+          "n": 900,
+          "file": "0900.md",
+          "title": "QA: document error rate tracking on Coverage"
+        },
+        {
+          "n": 1000,
+          "file": "1000.md",
+          "title": "QA: invariant property tests on CommandParser"
+        }
+      ]
+    },
+    {
+      "id": "H",
+      "slug": "agent-h-integration",
+      "prompts": [
+        {
+          "n": 1,
+          "file": "0001.md",
+          "title": "E2E: cross-doc timeline synthesis offline"
+        },
+        {
+          "n": 2,
+          "file": "0002.md",
+          "title": "E2E: job-finder multi-hop"
+        },
+        {
+          "n": 3,
+          "file": "0003.md",
+          "title": "E2E: profile recall after /forget"
+        },
+        {
+          "n": 100,
+          "file": "0100.md",
+          "title": "E2E: ingest-then-query race"
+        },
+        {
+          "n": 200,
+          "file": "0200.md",
+          "title": "E2E: smfs semantic vs literal grep parity"
+        },
+        {
+          "n": 300,
+          "file": "0300.md",
+          "title": "E2E: 105 use-case green run"
+        },
+        {
+          "n": 400,
+          "file": "0400.md",
+          "title": "E2E: ingest-then-query race"
+        },
+        {
+          "n": 500,
+          "file": "0500.md",
+          "title": "E2E: smfs semantic vs literal grep parity"
+        },
+        {
+          "n": 600,
+          "file": "0600.md",
+          "title": "E2E: 105 use-case green run"
+        },
+        {
+          "n": 700,
+          "file": "0700.md",
+          "title": "E2E: ingest-then-query race"
+        },
+        {
+          "n": 800,
+          "file": "0800.md",
+          "title": "E2E: smfs semantic vs literal grep parity"
+        },
+        {
+          "n": 900,
+          "file": "0900.md",
+          "title": "E2E: 105 use-case green run"
+        },
+        {
+          "n": 1000,
+          "file": "1000.md",
+          "title": "E2E: ingest-then-query race"
+        }
+      ]
+    },
+    {
+      "id": "I",
+      "slug": "agent-i-product",
+      "prompts": [
+        {
+          "n": 1,
+          "file": "0001.md",
+          "title": "Product: UI.md motion token"
+        },
+        {
+          "n": 2,
+          "file": "0002.md",
+          "title": "Product: PLAN.md AT-M acceptance"
+        },
+        {
+          "n": 3,
+          "file": "0003.md",
+          "title": "Product: BS-M1 offline proof"
+        },
+        {
+          "n": 100,
+          "file": "0100.md",
+          "title": "Product: helpfulness refusal copy"
+        },
+        {
+          "n": 200,
+          "file": "0200.md",
+          "title": "Product: beats-siri.mov storyboard"
+        },
+        {
+          "n": 300,
+          "file": "0300.md",
+          "title": "Product: UI.md motion token"
+        },
+        {
+          "n": 400,
+          "file": "0400.md",
+          "title": "Product: inspector UX spec"
+        },
+        {
+          "n": 500,
+          "file": "0500.md",
+          "title": "Product: Appendix B metric mapping"
+        },
+        {
+          "n": 600,
+          "file": "0600.md",
+          "title": "Product: PLAN.md AT-M acceptance"
+        },
+        {
+          "n": 700,
+          "file": "0700.md",
+          "title": "Product: privacy indicator semantics"
+        },
+        {
+          "n": 800,
+          "file": "0800.md",
+          "title": "Product: Shared/ Codable alignment"
+        },
+        {
+          "n": 900,
+          "file": "0900.md",
+          "title": "Product: BS-M1 offline proof"
+        },
+        {
+          "n": 1000,
+          "file": "1000.md",
+          "title": "Product: hardware tier honest SLA"
+        }
+      ]
+    }
+  ],
+  "total": 6000,
+  "commit_policy": "single commit per agent at 1000/1000"
+}

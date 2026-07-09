@@ -12,6 +12,19 @@ public struct ListeningSocket: Equatable, Sendable {
 }
 
 public enum LoopbackAudit {
+    /// Known mnemo stack ports: engine 6767, ollama 11434, Rivet 6420, smfs 11111.
+    public static let knownPorts: Set<Int> = [6767, 11434, 6420, 11111]
+
+    public static func isMnemoOwned(_ socket: ListeningSocket) -> Bool {
+        let cmd = socket.command.lowercased()
+        let prefixes = ["ollama", "supermemory-server", "supermem", "smfs", "mnemo", "rivet"]
+        if prefixes.contains(where: { cmd.hasPrefix($0) }) { return true }
+        if let port = Int(socket.address.split(separator: ":").last ?? "") {
+            return knownPorts.contains(port)
+        }
+        return false
+    }
+
     public static func parseLSOF(_ text: String) -> [ListeningSocket] {
         var out: [ListeningSocket] = []
         for line in text.split(separator: "\n").dropFirst() { // drop header
@@ -27,8 +40,10 @@ public enum LoopbackAudit {
         return out
     }
     public static func nonLoopback(_ sockets: [ListeningSocket]) -> [ListeningSocket] {
-        sockets.filter {
-            !($0.address.hasPrefix("127.0.0.1:") || $0.address.hasPrefix("[::1]:") || $0.address.hasPrefix("localhost:"))
-        }
+        sockets.filter { !isLoopbackAddress($0.address) }
+    }
+
+    public static func isLoopbackAddress(_ address: String) -> Bool {
+        address.hasPrefix("127.0.0.1:") || address.hasPrefix("[::1]:") || address.hasPrefix("localhost:")
     }
 }

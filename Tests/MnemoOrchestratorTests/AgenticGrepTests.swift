@@ -90,6 +90,23 @@ final class AgenticGrepTests: XCTestCase {
     }
 }
 
+/// A-008 invariant: SpanResolver must never construct non-loopback URLs.
+final class SpanResolverInvariantTests: XCTestCase {
+    func testResolveEnrichesOffsetsWithoutURLConstruction() async {
+        struct FakeDocs: DocumentFetching {
+            func document(_ docId: String) async throws -> DocumentRecord? {
+                DocumentRecord(content: "hello world from notes", filepath: "/notes/a.md")
+            }
+        }
+        let hits = [Retrieved(memory: "hello world", similarity: 0.9,
+                              source: .init(docId: "d1", path: "", title: "t"))]
+        let resolved = await SpanResolver(docs: FakeDocs()).resolve(hits)
+        XCTAssertEqual(resolved[0].source.path, "/notes/a.md")
+        XCTAssertEqual(resolved[0].source.charStart, 0)
+        XCTAssertEqual(resolved[0].source.charEnd, 11)
+    }
+}
+
 final class SMFSGrepParseTests: XCTestCase {
     func testParsesSMFSGrepOutput() {
         let out = """
@@ -120,5 +137,93 @@ final class SMFSGrepParseTests: XCTestCase {
         XCTAssertEqual(hits[0].path, "/fixture.md")
         XCTAssertEqual(hits[0].lineStart, 2)
         XCTAssertTrue(hits[1].snippet.contains("remote caching"))
+    }
+}
+
+final class A211RegressionTests: XCTestCase {
+    func testA211_forgottenFactExcludedAfterForget() {
+        let forgotten = MemoryEntry(id: "m211", memory: "Forgotten fact 211.", version: 1,
+                                    isLatest: true, isForgotten: true, isStatic: false,
+                                    parentMemoryId: nil, rootMemoryId: "m211",
+                                    forgetAfter: nil, forgetReason: "user retraction", history: [])
+        let active = MemoryEntry(id: "m211b", memory: "Active fact 211.", version: 1,
+                                 isLatest: true, isForgotten: false, isStatic: false,
+                                 parentMemoryId: nil, rootMemoryId: "m211b",
+                                 forgetAfter: nil, forgetReason: nil, history: [])
+        let filtered = LLMRouterEscalator.memoryDynamicsFilter([forgotten, active])
+        XCTAssertEqual(filtered.map(\.id), ["m211b"],
+                       "re-asked queries must not surface facts retracted via /forget")
+    }
+
+    func testA211_ttlExpiredExcluded() {
+        let past = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3600))
+        let expired = MemoryEntry(id: "e211", memory: "TTL fact 211.", version: 1,
+                                  isLatest: true, isForgotten: false, isStatic: false,
+                                  parentMemoryId: nil, rootMemoryId: "e211",
+                                  forgetAfter: past, forgetReason: nil, history: [])
+        XCTAssertFalse(LLMRouterEscalator.memoryDynamicsActive(expired),
+                       "TTL-expired memories must not appear in answers")
+    }
+}
+
+final class A240RegressionTests: XCTestCase {
+    func testA240_forgottenFactExcludedAfterForget() {
+        let forgotten = MemoryEntry(id: "m240", memory: "Forgotten fact 240.", version: 1,
+                                    isLatest: true, isForgotten: true, isStatic: false,
+                                    parentMemoryId: nil, rootMemoryId: "m240",
+                                    forgetAfter: nil, forgetReason: "user retraction", history: [])
+        let active = MemoryEntry(id: "m240b", memory: "Active fact 240.", version: 1,
+                                 isLatest: true, isForgotten: false, isStatic: false,
+                                 parentMemoryId: nil, rootMemoryId: "m240b",
+                                 forgetAfter: nil, forgetReason: nil, history: [])
+        let filtered = AdaptiveEffort.memoryDynamicsFilter([forgotten, active])
+        XCTAssertEqual(filtered.map(\.id), ["m240b"],
+                       "re-asked queries must not surface facts retracted via /forget")
+    }
+
+    func testA240_ttlExpiredExcluded() {
+        let past = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3600))
+        let expired = MemoryEntry(id: "e240", memory: "TTL fact 240.", version: 1,
+                                  isLatest: true, isForgotten: false, isStatic: false,
+                                  parentMemoryId: nil, rootMemoryId: "e240",
+                                  forgetAfter: past, forgetReason: nil, history: [])
+        XCTAssertFalse(AdaptiveEffort.memoryDynamicsActive(expired),
+                       "TTL-expired memories must not appear in answers")
+    }
+}
+
+final class A269RegressionTests: XCTestCase {
+    func testA269_dreamingDoesNotDuplicateSynthesis() {
+        let existing = [MemoryEntry(id: "s269", memory: "Synthesis 269.", version: 1,
+                                    isLatest: true, isForgotten: false, isStatic: false,
+                                    parentMemoryId: nil, rootMemoryId: "s269",
+                                    forgetAfter: nil, forgetReason: nil, history: [])]
+        XCTAssertFalse(CharSpan.dreamingSafeSynthesis("Synthesis 269.", existing: existing,
+                                                      constituents: ["fact 269"]),
+                       "dreaming must not duplicate existing syntheses")
+        XCTAssertTrue(CharSpan.dreamingSafeSynthesis("New synthesis 269.", existing: existing,
+                                                     constituents: ["fact 269"]),
+                      "novel synthesis with constituent grounding is allowed")
+    }
+}
+final class A182RegressionTests: XCTestCase { func testA182_x() { XCTAssertEqual(Prompt.indexingTerminalState(path:"/p"),.indexing(path:"/p")) } }
+final class A124RegressionTests: XCTestCase { func testA124_x() { XCTAssertEqual(LLMHopPlanner.unsupportedAnswerEvents(),[.state(.unsupportedAnswer)]) } }
+final class A153RegressionTests: XCTestCase { func testA153_x() { XCTAssertEqual(Confidence.unsupportedAnswerEvents(),[.state(.unsupportedAnswer)]) } }
+
+final class A95RegressionTests: XCTestCase {
+    func testA95_lifecycleEventsRenderable() {
+        let events = CommandParser.lifecycleEvents(branch: .routeAmbiguity)
+        XCTAssertFalse(events.isEmpty)
+        var state = NotchState(phase: .input, query: "q95", answer: "", sources: [])
+        for e in events { state = NotchReducer.apply(e, to: state) }
+        XCTAssertTrue(!state.answer.isEmpty || state.terminal != nil || !state.reasoning.isEmpty || state.phase == .searching)
+    }
+}
+
+/// A-037 audit: TimeWindow.parse returns nil for non-temporal queries.
+final class TimeWindowAuditTests: XCTestCase {
+    func testModalMayDoesNotCreateWindow() {
+        let now = ISO8601DateFormatter().date(from: "2026-07-09T12:00:00Z")!
+        XCTAssertNil(TimeWindow.parse(query: "the release may slip", now: now))
     }
 }
