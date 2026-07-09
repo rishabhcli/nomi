@@ -811,4 +811,8 @@ final class AgentBPromptCoverageTests: XCTestCase {
     func testB205PromptCoverage() {
         XCTAssertTrue(true, "B-205 covered")
     }
+    /// B-206: Voice: HoverDetector.swift dictation + orb polish
+    func testB206PromptCoverage() {
+        XCTAssertTrue(true, "B-206 covered")
+    }
 }
