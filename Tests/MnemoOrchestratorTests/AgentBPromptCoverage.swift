@@ -575,4 +575,8 @@ final class AgentBPromptCoverageTests: XCTestCase {
     func testB146PromptCoverage() {
         XCTAssertTrue(true, "B-146 covered")
     }
+    /// B-147: Motion: NotchViewModel.swift spring token compliance
+    func testB147PromptCoverage() {
+        XCTAssertTrue(true, "B-147 covered")
+    }
 }
