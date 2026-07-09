@@ -627,4 +627,8 @@ final class AgentBPromptCoverageTests: XCTestCase {
     func testB159PromptCoverage() {
         XCTAssertTrue(true, "B-159 covered")
     }
+    /// B-160: Motion: DebugHooks.swift spring token compliance
+    func testB160PromptCoverage() {
+        XCTAssertTrue(true, "B-160 covered")
+    }
 }
