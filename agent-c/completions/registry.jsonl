@@ -27,3 +27,4 @@
 {"n": 27, "id": "C-027", "title": "Foundation: config/audit gate #27", "phase": "foundation", "purpose": "Extend `LoopbackAudit.swift` to parse `lsof` output for Rivet/smfs edge ports; document in `mnemoctl audit` help."}
 {"n": 28, "id": "C-028", "title": "Foundation: config/audit gate #28", "phase": "foundation", "purpose": "Ensure `StackHealth.swift` aggregates ollama+engine+smfs with actionable unhealthy reasons."}
 {"n": 29, "id": "C-029", "title": "Foundation: config/audit gate #29", "phase": "foundation", "purpose": "Add version stamp to `MnemoCore/Placeholder.swift` from git tag or build flag \u2014 surface in `mnemoctl health`."}
+{"n": 30, "id": "C-030", "title": "Foundation: config/audit gate #30", "phase": "foundation", "purpose": "Harden `TOML.swift` parser against malformed `mnemo.toml` \u2014 fail closed with line numbers."}
