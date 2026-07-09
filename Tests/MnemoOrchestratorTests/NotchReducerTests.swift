@@ -177,4 +177,9 @@ final class NotchReducerTests: XCTestCase {
         s = NotchReducer.apply(.token("x"), to: s)
         XCTAssertNotEqual(s.phase, .idle)
     }
+    func testReasoningUI_citation_B269() {
+        var s = NotchState(phase: .searching, query: "q", answer: "", sources: [])
+        s = NotchReducer.apply(.citation(sentenceIndex: 0, supported: false), to: s)
+        XCTAssertNotEqual(s.phase, .idle)
+    }
 }
