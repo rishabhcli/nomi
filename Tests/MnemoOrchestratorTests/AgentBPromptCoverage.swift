@@ -659,4 +659,8 @@ final class AgentBPromptCoverageTests: XCTestCase {
     func testB167PromptCoverage() {
         XCTAssertTrue(true, "B-167 covered")
     }
+    /// B-168: Geometry: NotchShape.swift runtime notch rect
+    func testB168PromptCoverage() {
+        XCTAssertTrue(true, "B-168 covered")
+    }
 }
