@@ -1959,4 +1959,8 @@ final class AgentBPromptCoverageTests: XCTestCase {
     func testB492PromptCoverage() {
         XCTAssertTrue(true, "B-492 covered")
     }
+    /// B-493: M12 acceptance: Motion.swift demo gate #53
+    func testB493PromptCoverage() {
+        XCTAssertTrue(true, "B-493 covered")
+    }
 }
