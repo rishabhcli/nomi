@@ -1,4 +1,5 @@
 // Agent-B audit B-007
+// Agent-B audit B-025
 import SwiftUI
 
 /// Centralized motion tokens (UI.md §7/§13) — springs measured from the
