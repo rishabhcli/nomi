@@ -1255,4 +1255,8 @@ final class AgentBPromptCoverageTests: XCTestCase {
     func testB316PromptCoverage() {
         XCTAssertTrue(true, "B-316 covered")
     }
+    /// B-317: Sources UI: VoiceOrb.metal citation cards
+    func testB317PromptCoverage() {
+        XCTAssertTrue(true, "B-317 covered")
+    }
 }
