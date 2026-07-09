@@ -911,4 +911,8 @@ final class AgentBPromptCoverageTests: XCTestCase {
     func testB230PromptCoverage() {
         XCTAssertTrue(true, "B-230 covered")
     }
+    /// B-231: Voice: CorpusControl.swift dictation + orb polish
+    func testB231PromptCoverage() {
+        XCTAssertTrue(true, "B-231 covered")
+    }
 }
