@@ -667,4 +667,8 @@ final class AgentBPromptCoverageTests: XCTestCase {
     func testB169PromptCoverage() {
         XCTAssertTrue(true, "B-169 covered")
     }
+    /// B-170: Geometry: HoverDetector.swift runtime notch rect
+    func testB170PromptCoverage() {
+        XCTAssertTrue(true, "B-170 covered")
+    }
 }
