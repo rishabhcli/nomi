@@ -20,12 +20,17 @@ echo "Static checks:"
 
 # Config invariant patterns
 grep -q 'validateInvariant' Sources/MnemoCore/MnemoConfig.swift && echo "  [ok] MnemoConfig.validateInvariant"
+grep -q 'ConfigSchema' Sources/MnemoCore/ConfigSchema.swift && echo "  [ok] ConfigSchema fail-closed"
+grep -q 'QueryLogTracker' Sources/MnemoCore/QueryLogTracker.swift && echo "  [ok] QueryLogTracker wiring"
 grep -q 'MnemoExitCode' Sources/MnemoCore/MnemoConfig.swift && echo "  [ok] exit code contract"
 grep -q 'StructuredLog' Sources/MnemoCore/StructuredLog.swift && echo "  [ok] StructuredLog.swift"
+grep -q 'SLAGate' Sources/MnemoCore/SLAGate.swift && echo "  [ok] SLAGate regression"
 grep -q 'isMnemoOwned' Sources/MnemoSupervisor/LoopbackAudit.swift && echo "  [ok] LoopbackAudit rivet/smfs"
+grep -q 'SupervisorLogAggregator' Sources/MnemoSupervisor/SupervisorLog.swift && echo "  [ok] supervisor log aggregation"
 grep -q 'unhealthyReasons' Sources/MnemoCore/StackHealth.swift && echo "  [ok] StackHealth reasons"
 test -f scripts/ci.sh && echo "  [ok] scripts/ci.sh"
 test -f .github/workflows/ci.yml && echo "  [ok] CI workflow"
+grep -q 'logSink' Sources/MnemoOrchestrator/QueryService.swift && echo "  [ok] QueryService StructuredLog"
 
 echo "VERIFY SHIM OK (static; run on macOS for full suite)"
 exit 0

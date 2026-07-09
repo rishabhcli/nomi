@@ -48,6 +48,9 @@ public actor ProcessSupervisor {
 
     public func restart(_ p: ManagedProcess) async throws {
         await launcher.terminate(p)
+        if config.supervisor.restartBackoffMs > 0 {
+            try? await Task.sleep(for: .milliseconds(config.supervisor.restartBackoffMs))
+        }
         try await launcher.launch(p)
         if !(await waitUntilUp(p)) { throw SupervisorError.failedToStart(p) }
     }

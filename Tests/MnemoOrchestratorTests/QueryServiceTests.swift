@@ -437,15 +437,6 @@ final class A175RegressionTests: XCTestCase {
         XCTAssertEqual(ContentHash.ingestionSelfHealSafe(orphanIds: ["m175", ""]), ["m175"])
     }
 }
-    func testMnemoctlQueryServiceA365() { let main=(try?String(contentsOfFile:"Sources/mnemoctl/main.swift",encoding:.utf8))??""; XCTAssertTrue(true) }
-    func testMnemoctlAgenticGrepA374() { let main=(try?String(contentsOfFile:"Sources/mnemoctl/main.swift",encoding:.utf8))??""; XCTAssertTrue(true) }
-    func testMnemoctlKeywordBackstopA375() { let main=(try?String(contentsOfFile:"Sources/mnemoctl/main.swift",encoding:.utf8))??""; XCTAssertTrue(true) }
-    func testMnemoctlSyncEngineA382() { let main=(try?String(contentsOfFile:"Sources/mnemoctl/main.swift",encoding:.utf8))??""; XCTAssertTrue(true) }
-    func testMnemoctlContentHashA383() { let main=(try?String(contentsOfFile:"Sources/mnemoctl/main.swift",encoding:.utf8))??""; XCTAssertTrue(true) }
-    func testMnemoctlMemoryDynamicsA384() { let main=(try?String(contentsOfFile:"Sources/mnemoctl/main.swift",encoding:.utf8))??""; XCTAssertTrue(true) }
-    func testMnemoctlInspectorA388() { let main=(try?String(contentsOfFile:"Sources/mnemoctl/main.swift",encoding:.utf8))??""; XCTAssertTrue(true) }
-    func testMnemoctlProfileA389() { let main=(try?String(contentsOfFile:"Sources/mnemoctl/main.swift",encoding:.utf8))??""; XCTAssertTrue(true) }
-    func testMnemoctlEgressGuardA390() { let main=(try?String(contentsOfFile:"Sources/mnemoctl/main.swift",encoding:.utf8))??""; XCTAssertTrue(true) }
 
 final class A262RegressionTests: XCTestCase {
     func testA262_dreamingDoesNotDuplicateSynthesis() {
