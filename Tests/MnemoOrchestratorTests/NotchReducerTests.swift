@@ -162,4 +162,9 @@ final class NotchReducerTests: XCTestCase {
         s = NotchReducer.apply(.routed(intent: "synthesis", effort: "medium"), to: s)
         XCTAssertNotEqual(s.phase, .idle)
     }
+    func testReasoningUI_understanding_B266() {
+        var s = NotchState(phase: .searching, query: "q", answer: "", sources: [])
+        s = NotchReducer.apply(.understanding("Reading…"), to: s)
+        XCTAssertNotEqual(s.phase, .idle)
+    }
 }
