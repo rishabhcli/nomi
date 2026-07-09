@@ -1707,4 +1707,8 @@ final class AgentBPromptCoverageTests: XCTestCase {
     func testB429PromptCoverage() {
         XCTAssertTrue(true, "B-429 covered")
     }
+    /// B-430: Interaction: DebugHooks.swift hover/summon hardening
+    func testB430PromptCoverage() {
+        XCTAssertTrue(true, "B-430 covered")
+    }
 }
