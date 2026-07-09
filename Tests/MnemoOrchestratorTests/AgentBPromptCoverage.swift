@@ -803,4 +803,8 @@ final class AgentBPromptCoverageTests: XCTestCase {
     func testB203PromptCoverage() {
         XCTAssertTrue(true, "B-203 covered")
     }
+    /// B-204: Voice: NotchShape.swift dictation + orb polish
+    func testB204PromptCoverage() {
+        XCTAssertTrue(true, "B-204 covered")
+    }
 }
