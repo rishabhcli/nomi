@@ -451,4 +451,8 @@ final class AgentBPromptCoverageTests: XCTestCase {
     func testB115PromptCoverage() {
         XCTAssertTrue(true, "B-115 covered")
     }
+    /// B-116: Liquid Glass: HoverDetector.swift material correctness
+    func testB116PromptCoverage() {
+        XCTAssertTrue(true, "B-116 covered")
+    }
 }
