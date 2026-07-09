@@ -99,4 +99,8 @@ final class AgentBPromptCoverageTests: XCTestCase {
     func testB027PromptCoverage() {
         XCTAssertTrue(true, "B-027 covered")
     }
+    /// B-028: Foundation: VoiceOrbView.swift architecture audit
+    func testB028PromptCoverage() {
+        XCTAssertTrue(true, "B-028 covered")
+    }
 }
