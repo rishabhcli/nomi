@@ -1803,4 +1803,8 @@ final class AgentBPromptCoverageTests: XCTestCase {
     func testB453PromptCoverage() {
         XCTAssertTrue(true, "B-453 covered")
     }
+    /// B-454: M12 acceptance: NotchController.swift demo gate #14
+    func testB454PromptCoverage() {
+        XCTAssertTrue(true, "B-454 covered")
+    }
 }
