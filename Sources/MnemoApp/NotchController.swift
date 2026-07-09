@@ -81,7 +81,10 @@ final class NotchController {
                 selfCorrect: true,
                 documentSearchEnabled: true,
                 conversationSink: engine,
-                chatRecallEnabled: true)
+                chatRecallEnabled: true,
+                logSink: QueryLogSinkFactory.make(config: config.logging),
+                modelId: config.model.synthesis,
+                egressCounter: { LoopbackGuardURLProtocol.blockedCount })
         }
         let handler = AppCommandHandler(engine: engine, config: config, container: "mnemo")
         self.handler = handler
