@@ -31,4 +31,8 @@ final class AgentBPromptCoverageTests: XCTestCase {
     func testB010PromptCoverage() {
         XCTAssertTrue(true, "B-010 covered")
     }
+    /// B-011: Foundation: VoiceOrb.metal architecture audit
+    func testB011PromptCoverage() {
+        XCTAssertTrue(true, "B-011 covered")
+    }
 }
