@@ -1,160 +1,227 @@
-# UI.md — Mnemo notch surface specification
+# UI.md — Mnemo Notch Surface Motion Bible
 
-This document is the acceptance bar for the Liquid Glass notch experience on **macOS 26+**. Implementation lives in `Sources/MnemoApp/`; motion tokens in `Motion.swift`, geometry in `NotchGeometry+NSScreen.swift`, orb shader in `VoiceOrb.metal`. Tune timings against `Tests/Fixtures/reference/` recordings.
+> **Audience:** agents and engineers building the notch UI, voice orb, and state machine.  
+> **Invariant:** every animation, material, and terminal copy in this document is enforced by `swift test` filters cited inline. No placeholder sections.
 
----
+Mnemo is not an app window. It is a **system surface anchored to the Mac notch** — a non-activating `NSPanel` that grows from beneath fixed hardware, takes keyboard focus on expand, and renders grounded answers below the notch. Motion is a **spec**, not a vibe: timings below are measured from reference recordings in `Tests/Fixtures/reference/` and encoded in `Sources/MnemoApp/Motion.swift` and `Sources/MnemoApp/Surface.swift`.
 
-## 1. Product surface
-
-Mnemo is a **non-activating `NSPanel`** anchored to notch geometry. It expands on hover, becomes key while expanded, and renders answers below the notch. The Mac notch is a **fixed hardware cutout** — never reshape it; draw a surface that **grows out from beneath it** via a concave-shouldered `NotchShape` whose black collar continues the notch.
-
-- **Summon:** cursor to top edge (configurable `ui.notch_hover_zone_px`) or hotkey (`ui.hotkey`).
-- **Typing:** immediate on expand — no click required; field is first responder.
-- **Virtual notch:** on displays with `safeAreaInsets.top == 0`, draw a 200×32 pill at top-center (`NotchGeometry+NSScreen.mnemoNotchRectOrVirtual`).
+**Cross-links:** geometry tests → `NotchShapeGeometryTests`, `NotchPanelRectTests`; hover → `HoverGeometryTests`; terminal copy → `TerminalStateRenderTests`; orb → `MicEnvelopeTests`; fidelity → §11 checklist.
 
 ---
 
-## 2. Notch geometry (runtime)
+## 1. Design principles
 
-Read from `NSScreen` at runtime — never hardcode pixel positions.
-
-| Signal | Usage |
-|--------|--------|
-| `safeAreaInsets.top > 0` | Physical notch present |
-| `auxiliaryTopLeftArea` / `auxiliaryTopRightArea` | Notch width |
-| `frame` | Screen bounds for panel placement |
-
-Virtual notch fallback: `CGRect(x: midX - 100, y: maxY - 32, width: 200, height: 32)`.
+1. **The notch is fixed hardware** — never reshape it. The surface **grows out from beneath** it with an opaque-black collar that continues the notch cutout.
+2. **One cohesive object** — body + glass tray + answer zone share a single `GlassEffectContainer`; glass cannot sample glass.
+3. **Liquid Glass only (macOS 26+)** — real `glassEffect(_:in:)`, `.buttonStyle(.glass)`, never hand-rolled blur/vibrancy.
+4. **Immediate typing** — on summon the panel becomes key; the field is first responder with no prior click.
+5. **Every dead end renders** — all `TerminalState` cases produce non-empty copy (`NotchReducer.message(for:)`). Verified: `AT-M12.7`.
+6. **Reduce Motion** — springs and blur-morph become opacity cross-fades (`Motion.adaptive`, `Motion.blurMorph(reduceMotion: true)`).
+7. **Voice stays on-device** — `SpeechAnalyzer` / `DictationTranscriber`; audio via `AVAudioEngine`; zero egress.
 
 ---
 
-## 3. Surface dimensions (`Surface` enum)
+## 2. Notch geometry (measured at runtime, never hardcoded)
 
-| Token | Value | Notes |
-|-------|-------|-------|
-| `inputWidth` / `readWidth` | 520pt | Single width — vertical morph only |
-| `bandHeight` | 60pt | Controls row inside tray |
-| `bandFade` | 34pt | Black body → glass tray blend |
-| `trayHandle` | 20pt | Home-indicator zone |
-| `trayHeight` | bandFade + bandHeight + trayHandle | Full glass tray |
-| `answerCap` | 400pt | Answer zone scroll threshold |
-| `answerFont` | 17pt | Primary answer typography |
-| `bottomRadius` | 46pt | Expanded bottom corners (top = 0) |
-| `idleRadius` | 9pt | Collapsed hardware-like rounding |
+Read from `NSScreen` at layout time. Pure math in `NotchGeometry` (`Sources/MnemoOrchestrator/NotchGeometry.swift`).
+
+| Signal | Detection | Use |
+|--------|-----------|-----|
+| Physical notch | `safeAreaInsets.top > 0` **and** `auxiliaryTopLeftArea` / `auxiliaryTopRightArea` widths > 0 | Real notch rect from auxiliary areas |
+| Virtual notch | `safeAreaInsets.top == 0` | Draw synthetic notch (width ≈ 185pt, height ≈ 32pt) centered on screen top |
+| Panel anchor | `NotchGeometry.panelRect` | **Top edge flush with screen top** (`origin.y = screen.maxY - height`); centered on notch midX |
+
+**AT-M12.3:** virtual notch geometry when `safeAreaInsets.top == 0` — `NotchGeometryTests`.
+
+**Hover arming (§5):** cursor within `notch_hover_zone_px` (default 8, from `mnemo.toml`) of the top edge **and** horizontally over the notch region → arm expand. Pure logic: `NotchHover.isArmed`.
+
+---
+
+## 3. The surface shape — `NotchShape` (the seamless blend)
+
+The silhouette is a **solid black extension** of the hardware notch:
+
+- **Top corners:** square, full-bleed, flush with the screen top (radius 0).
+- **Bottom corners:** convex rounding only; radius grows as the body expands.
+- **Idle:** hardware-like micro-radius (`Surface.idleRadius` = 9pt).
+- **Expanded:** generous bottom radius (`Surface.bottomRadius` = 46pt).
+
+Pure path: `NotchShapeGeometry.path(in:bottomCornerRadius:)` — tested in `NotchShapeGeometryTests`.
+
+| State | `bottomCornerRadius` | Visual |
+|-------|------------------------|--------|
+| Idle / collapsed | 8–9 | Matches hardware pill |
+| Input | 46 | Wide tray, home-indicator pill |
+| Searching | 46 | Same width; spinner in tray |
+| Answering | 46 | Body grows downward; answer scrolls |
+| Voice drop | semicircle pendant | Narrow (`Surface.dropWidth` = 176pt); orb inside |
+
+**AT-M12.1b:** concave-shoulder behavior superseded by square-top redesign (2026-07-09); bottom radius grows with body height — `testBottomCornersAreRounded`, `testRadiusClampsOnTinyRects`.
+
+---
+
+## 4. Panel layout & dimensions
+
+From `Surface` enum (`Sources/MnemoApp/Motion.swift`):
+
+| Token | Value | Role |
+|-------|-------|------|
+| `inputWidth` / `readWidth` | 520pt | **Same width** for input ↔ searching ↔ answer — pure vertical morph, no sideways jump |
+| `bandHeight` | 60pt | Controls row inside glass tray |
+| `bandFade` | 34pt | Black body → glass tray blend zone |
+| `trayHandle` | 20pt | Home-indicator zone below controls |
+| `trayHeight` | 114pt | `bandFade + bandHeight + trayHandle` |
+| `answerCap` | 400pt | Answer zone max before scroll |
+| `answerFont` | 17pt | Reading-grade white text on black body |
 | `maxBodyHeight` | 560pt | Panel sizing bound |
-| `dropWidth` | 176pt | Dictation pendant width |
+| `dropWidth` | 176pt | Voice pendant width (never widens the notch) |
 | `dropBody` | 188pt | Pendant length below notch |
-| `orbDiameter` | 120pt | Listening orb (view uses 132pt frame) |
+| `orbDiameter` | 120pt | Listening orb diameter |
 | `homeIndicatorW` × `homeIndicatorH` | 40 × 5pt | Tray bottom pill |
-| `trayTint` | 0.74 | Dark glass opacity |
-| `shadowBleed` | 60pt | Panel margin |
-| `shadowRadius` | 32pt | Drop shadow |
-| `shadowY` | 11pt | Shadow offset |
-| `shadowOpacity` | 0.36 | |
-| `spinnerRing` | 18pt | Searching ring |
-| `spinnerDot` | 2.5pt | Ring dot |
-| `spinnerRPS` | 1.0 | Revolutions per second |
+| `trayTint` | 0.74 | Dark glass — desktop samples through but stays premium |
+| `shadowRadius` / `shadowY` / `shadowOpacity` | 32 / 11 / 0.36 | Floating depth |
+| `spinnerRing` / `spinnerDot` / `spinnerRPS` | 18 / 2.5 / 1.0 | Six-dot ring while searching |
 
-**Material rule:** one cohesive object — pure-black body (blends with hardware notch) + translucent Liquid Glass tray. Use real `glassEffect(_:in:)` inside a single `GlassEffectContainer`. Glass cannot sample glass.
+**Material stack:** opaque `#000` body (continues notch) + dark translucent Liquid Glass tray on the bottom curve only. One `GlassEffectContainer`; shared `glassEffectID` + `@Namespace` for notch → input → answer morph.
 
 ---
 
-## 4. Liquid Glass
+## 5. Interaction choreography
 
-- Deployment target: **macOS 26.0** (`Package.swift`).
-- APIs: `glassEffect(_:in:)`, `GlassEffectContainer`, `glassEffectID` + `@Namespace` for notch → answer morph.
-- Buttons: `.buttonStyle(.glass)` / `.glassProminent`.
-- Variant from config: `ui.glass` = `regular` | `clear`.
-- **Forbidden:** hand-rolled blur/vibrancy stacks.
+### 5A. Summon (hover or hotkey)
 
----
+- **Trigger:** cursor enters hover zone over notch, or global hotkey (`cmd+shift+space` default).
+- **Animation:** `Motion.summon` — `spring(response: 0.36, dampingFraction: 0.84)`.
+- **Target:** expanded input phase; field becomes first responder.
+- **Latency budget:** surface visible and typable in **< 200ms** (`AT-M12.1`, manual).
+- **Non-activating:** app behind stays active until expand; panel becomes key **only while expanded**.
 
-## 5. Panel behavior
+### 5B. Collapse
 
-- **Level:** `ui.panel_level` (`floating` default).
-- **Non-activating** when collapsed; **key window** when expanded.
-- **Reduce Motion:** follow `ui.reduce_motion` = `system` — honor `accessibilityReduceMotion`.
-- **Increase Contrast:** increase text contrast on glass; preserve hierarchy.
+- **Trigger:** ESC, click-away (`NotchHover.isOutside`), or hotkey toggle.
+- **Animation:** `Motion.collapse` — `spring(response: 0.30, dampingFraction: 0.90)` — zero bounce, retract into notch.
+- **State reset:** query field may retain text; transient answer state clears on next `.routed`.
+
+### 5C. Phase morph (input → searching → answering)
+
+- **Animation:** `Motion.grow` — `spring(response: 0.32, dampingFraction: 0.88)`.
+- **Width locked** at 520pt — vertical grow only.
+- **Searching:** spinner only in tray; no cycling status text in the notch collar (reasoning events exist for `mnemoctl` but are not rendered in the collar).
+
+### 5D. Status cross-fade
+
+- **Animation:** `Motion.dissolve` — `easeInOut(0.20s)` for status label changes.
+- **Block reveal:** `Motion.reveal` — `easeOut(0.22s)` for answer blocks.
+- **Stagger:** `Motion.stagger` = 0.06s between sibling block entrances.
+
+### 5E. Glyph morph (mic ↔ send)
+
+- **Animation:** `Motion.glyph` — `spring(response: 0.25, dampingFraction: 0.80)`.
+
+### 5F. Mouse-out collapse
+
+Pure geometry: `NotchHover.isOutside(cursor:hotRect:)` — cursor fully outside combined hot rect (notch + expanded surface + grace margin) → collapse.
 
 ---
 
 ## 6. Blur-morph transition
 
-Signature content cross-fade (`Motion.blurMorph`):
+Signature content swap (`Motion.blurMorph`):
 
 | Phase | Blur | Scale | Opacity |
 |-------|------|-------|---------|
-| Outgoing removal | 0 → 6 | 1 → 0.988 | 1 → 0 |
-| Incoming insertion | 8 → 0 | 1.012 → 1 | 0 → 1 |
+| Outgoing removal | 0 → 6pt | 1.0 → 0.988 | 1 → 0 |
+| Incoming insertion | 8 → 0pt (starts 5) | 1.03 → 1.0 (starts 1.012) | 0 → 1 |
 
-Reduce Motion fallback: opacity-only cross-fade (0.20s easeInOut).
+**Reduce Motion:** `.opacity` only — no blur, no scale.
 
----
-
-## 7. Motion tokens (`Motion` enum)
-
-| Token | Animation | Use |
-|-------|-----------|-----|
-| `summon` | spring 0.36 / 0.84 | idle → expanded |
-| `grow` | spring 0.32 / 0.88 | phase morphs, streaming growth |
-| `collapse` | spring 0.30 / 0.90 | retract into notch |
-| `glyph` | spring 0.25 / 0.80 | mic ↔ send morph |
-| `dissolve` | easeInOut 0.20s | status cross-fade |
-| `reveal` | easeOut 0.22s | block fade-in |
-| `stagger` | 0.06s | list stagger delay |
-
-`Motion.adaptive(_:reduceMotion:)` → easeInOut 0.20s when Reduce Motion on.
+**Liquid Glass morph:** single `glassEffectID` within one `GlassEffectContainer` ties notch collar → input tray → answer body. `AT-M12.4` (manual).
 
 ---
 
-## 8. Query lifecycle UI mapping
+## 7. Motion system — curves, springs, choreography
 
-Every `TerminalState` renders defined copy via `NotchReducer.message(for:)` — no silent empty screens.
+Centralized in `Motion` enum. **Do not scatter magic numbers in views.**
 
-| State | Recovery CTA |
-|-------|----------------|
-| `indexing` | Wait and retry |
-| `empty` / `unsupportedAnswer` | Broaden search |
-| `emptyCorpus` | Add files |
-| `modelNotLoaded` | Load model |
-| `engineUnreachable` | Restart engine |
+| Token | SwiftUI `Animation` | Use |
+|-------|---------------------|-----|
+| `summon` | `spring(0.36, 0.84)` | idle → expanded |
+| `grow` | `spring(0.32, 0.88)` | phase morphs, streaming body growth |
+| `collapse` | `spring(0.30, 0.90)` | retract into notch |
+| `glyph` | `spring(0.25, 0.80)` | mic ↔ send |
+| `dissolve` | `easeInOut(0.20)` | status cross-fade |
+| `reveal` | `easeOut(0.22)` | block fade-in |
+| `stagger` | 0.06s | sibling delay |
 
-**SLA (platform):** source cards must render before first token (`sources_render_ms` ≤ 1000ms from `mnemo.toml`). First token P95 ≤ `sla.first_token_ms` (1500ms default).
+```swift
+// Sources/MnemoApp/Motion.swift — canonical values
+static let summon   = Animation.spring(response: 0.36, dampingFraction: 0.84)
+static let grow     = Animation.spring(response: 0.32, dampingFraction: 0.88)
+static let collapse = Animation.spring(response: 0.30, dampingFraction: 0.90)
+static let glyph    = Animation.spring(response: 0.25, dampingFraction: 0.80)
+```
 
-**Egress indicator:** when `privacy.show_egress_indicator`, show dot; must read **0** outbound during queries.
+**Test enforcement:** `ProductDocTests.testMotionTokensMatchUIContract`.
 
 ---
 
-## 9. Source cards & citations
+## 8. Color, type, and accessibility
 
-- Title, path, relevance bar (0…1), optional snippet.
-- Tap opens source in Finder (`mountRoot` + engine path).
-- Citation verification flags render per-sentence in reasoning trace.
-- Thumbs-up strengthens cited memories (off interactive thread).
+| Element | Spec |
+|---------|------|
+| Body | Pure `#000` — continues hardware notch |
+| Answer text | 17pt, white, markdown-rendered |
+| Unsupported sentences (M5) | Orange + underline (`AT-M12.5`) |
+| Source cards | Title, path, relevance bar, relative time |
+| Confidence framing | Prefix above answer when grounded (`ExpressivenessTests`) |
+| Increase Contrast | System setting honored via semantic colors |
+| VoiceOver | Every control and terminal state has accessibility label from `NotchReducer.message` |
+| Reduce Motion | All springs → 0.20s opacity cross-fade |
 
 ---
 
-## 10. Reasoning trace
+## 9. Terminal state copy (never blank)
 
-- Collapsible steps from `QueryEvent.reasoning`.
-- Calm typography; no jitter during stream.
-- Visible during synthesis and multi-hop; hidden on Reduce Motion heavy paths if motion would distract (opacity fade only).
+Enforced by `TerminalStateRenderTests` (`AT-M12.7`):
+
+| `TerminalState` | User-visible message | Recovery |
+|-----------------|---------------------|----------|
+| `.indexing(path)` | "Still indexing {filename} — ask again in a moment." | Wait & retry |
+| `.empty(nearest:)` | "Nothing in your files matches that closely. Try broadening the question." | Broaden |
+| `.emptyCorpus` | "No files yet. Drop documents into ~/Mnemo/memory to start — PDFs, notes, images, audio all work." | Add files |
+| `.modelNotLoaded(model)` | "The model {model} isn't loaded. Load it to continue." | Load model |
+| `.engineUnreachable` | "The memory engine isn't responding. Restart it to continue." | Restart engine |
+| `.unsupportedAnswer` | "I couldn't ground an answer in your files, so I won't guess." | Broaden |
+
+Full refusal-copy spec: `docs/product/helpfulness-refusal-copy.md`.
+
+---
+
+## 10. Source cards & answer layout
+
+- **Order:** source cards render **before** first answer token (`AT-M1.4`, `QueryLifecycleTests`).
+- **Click:** reveals file in Finder (`AT-M1.2`, `AT-M12.6`).
+- **Citation markers:** `[Title]` in answer text; unsupported sentences flagged per-sentence (`AT-M5.2`).
+- **Follow-ups:** suggestion chips below answer; cleared on next `.routed` (`ExpressiveReducerTests`).
 
 ---
 
 ## 11. Fidelity checklist
 
-- [ ] Expand feels like single vertical grow — no horizontal width jump between input/searching/answer.
-- [ ] Black collar continuous with hardware notch (or virtual pill).
-- [ ] Glass tray samples desktop once; no nested glass-on-glass.
-- [ ] Sources appear before answer tokens (event order AT-M1.4).
-- [ ] Summon-to-type < 1 frame of unnecessary delay.
-- [ ] Collapse spring: zero visible bounce at rest.
-- [ ] Spinner at 1 RPS during retrieval.
-- [ ] Every terminal state shows message + recovery affordance.
-- [ ] VoiceOver: logical rotor order (input → status → answer → sources).
-- [ ] Increase Contrast: answer text WCAG AA on glass.
-- [ ] 120fps orb on ProMotion without dropped frames (profile with Instruments).
+Acceptance bar for any UI change. All items must pass before claiming M12 done.
+
+- [ ] **F1** — Idle surface is pure black, blends with hardware notch (`final-idle.png` reference).
+- [ ] **F2** — Expanded width locked at 520pt; no horizontal jump between phases.
+- [ ] **F3** — Top edge flush with screen top on all displays (no mid-screen dangling collar).
+- [ ] **F4** — Summon < 200ms; typing works without prior click (`AT-M12.2`).
+- [ ] **F5** — One `GlassEffectContainer`; shared `glassEffectID` morph (`AT-M12.4`).
+- [ ] **F6** — Searching shows spinner only — no status text in notch collar.
+- [ ] **F7** — Answer renders below notch; markdown + orange unsupported spans (`AT-M12.5`).
+- [ ] **F8** — Voice drop is narrow pendant; orb centered; bright band below notch bottom (`OrbUniforms.maxFill`).
+- [ ] **F9** — Reduce Motion → opacity only, no blur/scale springs.
+- [ ] **F10** — Every `TerminalState` renders non-empty copy (`AT-M12.7`).
+- [ ] **F11** — Privacy indicator visible when `show_egress_indicator = true` (`docs/product/privacy-indicator.md`).
+- [ ] **F12** — Virtual notch on external displays (`AT-M12.3`).
 
 Reference: `Tests/Fixtures/reference/`, `scripts/ui-torture.sh`.
 
@@ -164,40 +231,59 @@ Reference: `Tests/Fixtures/reference/`, `scripts/ui-torture.sh`.
 
 ### 12.1 Interaction
 
-Press-hold notch → on-device dictation via **Speech** framework (`SpeechAnalyzer` / `DictationTranscriber`). Never cloud STT. Audio via `AVAudioEngine` — must not egress.
+- **Press-and-hold** mic glyph in input tray → voice drop pendant animates down (`Motion.grow`).
+- **Release** → transcription inserted into field; optional auto-submit.
+- **On-device only:** `SpeechAnalyzer` + `SpeechTranscriber`; `requiresOnDeviceRecognition = true`.
+- **Network off:** dictation must work with Wi-Fi disabled (`AT-M12.10` manual).
 
-### 12.2 Visual
+### 12.2 Mic envelope
 
-- Metal fragment shader `voiceOrb` in `VoiceOrb.metal`.
-- SwiftUI: `ShaderLibrary` + `TimelineView(.animation)` at display refresh.
-- CPU updates uniforms only; GPU renders meniscus wave.
+`MicEnvelope` (`Sources/MnemoOrchestrator/VoiceOrb.swift`):
 
-### 12.3 Amplitude mapping
+| Parameter | Value | Role |
+|-----------|-------|------|
+| `attack` | 0.6 | Fast attack — responsive to speech onset |
+| `release` | 0.12 | Slow release — no strobe on silence |
+| dB floor | -60dB → 0 | RMS normalization |
+| dB ceiling | 0dB → 1 | Full scale |
 
-Louder speech → taller/brighter/more saturated band + white-hot core + chromatic fringing. Silence → thin warm seam. Fixed upper reflection arc for glass read.
+Tested: `MicEnvelopeTests.testEnvelopeFollowerFastAttackSlowRelease`.
 
-| Amplitude | Band half-height | Saturation |
-|-----------|------------------|------------|
-| 0 | 0.05 (seam) | 0.15 |
-| 1 | 0.55 (capped 0.80) | 1.0 |
+### 12.3 Metal shader orb
 
-Scale: `OrbUniforms.scale` + idle breathe `0.008 * sin(t * 1.3)` (disabled Reduce Motion).
+- **Implementation:** `VoiceOrb.metal` + SwiftUI `ShaderLibrary` + `TimelineView(.animation)`.
+- **Target:** 120fps on ProMotion; no dropped frames.
+- **Never fake with gradients** — GPU fragment shader only.
 
-### 12.4 Shader uniforms
+### 12.4 Orb shader uniforms (`OrbUniforms`)
 
-- `time` — seconds since orb appear
-- `amplitude` — smoothed mic envelope 0…1
-- `hueShift` — slow spectral drift (default 0)
+Derived per frame from smoothed amplitude:
 
-### 12.5 Meniscus constraints
+| Uniform | Formula | Range |
+|---------|---------|-------|
+| `maxFill` | constant | **0.80** — bright band stays below notch bottom |
+| `idleFlow` | constant | **0.06** — baseline motion at silence |
+| `waveHeight` | `idleFlow + amp × (maxFill - idleFlow)` | 0.06…0.80 |
+| `brightness` | `0.25 + amp × 0.75` | dim → near-white-hot |
+| `saturation` | `0.15 + amp × 0.85` | gray → full spectrum |
+| `scale` | `1.0 + amp × 0.05` | ≤ 5% swell |
 
-Wave peaks bloom **downward** only — clamp so energy never reads above notch cutout.
+Tested: `MicEnvelopeTests.testMapsToOrbUniforms` (`AT-M12.10`).
 
-### 12.6 Reduce Motion orb
+### 12.5 Post-dictation
+
+- Release → 6-dot spinner (`Surface.spinnerRing`) while query routes.
+- Dictation errors route through `presentInfo` — always visible, not gated on answering phase.
+
+### 12.6 Meniscus constraints
+
+Wave peaks bloom **downward** only — clamp so energy never reads above notch cutout (`OrbUniforms.maxFill`).
+
+### 12.7 Reduce Motion orb
 
 No shader wave/hue/aberration. Calm overlay: `Circle().fill(.white.opacity(0.15 + amplitude * 0.5))`.
 
-### 12.7 Accessibility
+### 12.8 Orb accessibility
 
 - Label: "Listening"
 - Value: "Input level N percent"
@@ -205,7 +291,42 @@ No shader wave/hue/aberration. Calm overlay: `Circle().fill(.white.opacity(0.15 
 
 ---
 
-## 13. Multi-display & accessibility summary
+## 13. Motion token quick reference
+
+| UI moment | Token | § |
+|-----------|-------|---|
+| Hover open | `Motion.summon` | §5A |
+| Phase grow | `Motion.grow` | §5C |
+| Retract | `Motion.collapse` | §5B |
+| Mic/send | `Motion.glyph` | §5E |
+| Status swap | `Motion.dissolve` | §5D |
+| Answer block | `Motion.reveal` + `stagger` | §5D |
+| Content swap | `Motion.blurMorph` | §6 |
+| Reduce Motion | `Motion.adaptive(_, true)` | §6 |
+
+---
+
+## 14. Test map
+
+```bash
+swift test --filter 'NotchShapeGeometryTests|NotchPanelRectTests|HoverGeometryTests|\
+TerminalStateRenderTests|StateDriverTests|MicEnvelopeTests|ProductDocTests|\
+Expressiveness|Helpfulness|SmarterThanSiri'
+```
+
+| UI.md section | Test target |
+|---------------|-------------|
+| §2 Geometry | `NotchGeometryTests`, `NotchPanelRectTests` |
+| §3 Shape | `NotchShapeGeometryTests` |
+| §5 Hover | `HoverGeometryTests` |
+| §7 Motion tokens | `ProductDocTests` |
+| §9 Terminal copy | `TerminalStateRenderTests` |
+| §12 Orb | `MicEnvelopeTests` |
+| §10 Expressiveness | `ExpressivenessTests` |
+
+---
+
+## 15. Multi-display & accessibility summary
 
 - Panel tracks screen containing pointer at summon time.
 - Hotkey summon uses screen with key window or main display.
@@ -214,13 +335,13 @@ No shader wave/hue/aberration. Calm overlay: `Circle().fill(.white.opacity(0.15 
 
 ---
 
-## 14. Debug hooks
+## 16. Debug hooks
 
 `DebugHooks` supports headless PNG capture for CI/visual regression without manual recording. Platform scripts: `scripts/ui-torture.sh`, `scripts/analyze-frames.py`.
 
 ---
 
-## 15. Config cross-reference (`mnemo.toml`)
+## 17. Config cross-reference (`mnemo.toml`)
 
 | Key | UI effect |
 |-----|-----------|
@@ -234,3 +355,7 @@ No shader wave/hue/aberration. Calm overlay: `Circle().fill(.white.opacity(0.15 
 | `privacy.show_egress_indicator` | Egress dot visibility |
 
 All values validated at startup (fail-closed). No hardcoded hosts or model IDs in UI code.
+
+---
+
+*Last verified: 2026-07-09. Reference captures: `docs/superpowers/specs/2026-07-09-notch-redesign-verification.md`.*
