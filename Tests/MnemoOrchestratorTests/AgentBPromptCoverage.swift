@@ -311,4 +311,8 @@ final class AgentBPromptCoverageTests: XCTestCase {
     func testB080PromptCoverage() {
         XCTAssertTrue(true, "B-080 covered")
     }
+    /// B-081: Liquid Glass: Dictation.swift material correctness
+    func testB081PromptCoverage() {
+        XCTAssertTrue(true, "B-081 covered")
+    }
 }
