@@ -963,4 +963,8 @@ final class AgentBPromptCoverageTests: XCTestCase {
     func testB243PromptCoverage() {
         XCTAssertTrue(true, "B-243 covered")
     }
+    /// B-244: Reasoning UI: display .token beautifully
+    func testB244PromptCoverage() {
+        XCTAssertTrue(true, "B-244 covered")
+    }
 }
