@@ -212,4 +212,9 @@ final class NotchReducerTests: XCTestCase {
         s = NotchReducer.apply(.state(.engineUnreachable), to: s)
         XCTAssertNotEqual(s.phase, .idle)
     }
+    func testReasoningUI_done_B276() {
+        var s = NotchState(phase: .searching, query: "q", answer: "", sources: [])
+        s = NotchReducer.apply(.done, to: s)
+        XCTAssertNotEqual(s.phase, .idle)
+    }
 }
