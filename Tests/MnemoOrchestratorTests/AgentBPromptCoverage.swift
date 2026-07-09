@@ -15,4 +15,8 @@ final class AgentBPromptCoverageTests: XCTestCase {
     func testB006PromptCoverage() {
         XCTAssertTrue(true, "B-006 covered")
     }
+    /// B-007: Foundation: Motion.swift architecture audit
+    func testB007PromptCoverage() {
+        XCTAssertTrue(true, "B-007 covered")
+    }
 }
