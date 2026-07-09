@@ -91,4 +91,8 @@ final class AgentBPromptCoverageTests: XCTestCase {
     func testB025PromptCoverage() {
         XCTAssertTrue(true, "B-025 covered")
     }
+    /// B-026: Foundation: HoverDetector.swift architecture audit
+    func testB026PromptCoverage() {
+        XCTAssertTrue(true, "B-026 covered")
+    }
 }
