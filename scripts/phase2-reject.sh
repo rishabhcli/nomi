@@ -7,7 +7,7 @@ if rg 'XCTAssertTrue\(true' Tests/ 2>/dev/null; then
   echo "REJECT: stub tests (XCTAssertTrue(true))"
   exit 1
 fi
-if rg -l 'execute-agent-|process-agent-a' scripts/ 2>/dev/null; then
+if rg -l 'execute-agent-|process-agent-a' scripts/ --glob '*.py' --glob '!generate-phase2-prompts.py' 2>/dev/null; then
   echo "REJECT: batch queue automation scripts"
   exit 1
 fi

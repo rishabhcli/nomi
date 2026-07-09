@@ -437,15 +437,51 @@ final class A175RegressionTests: XCTestCase {
         XCTAssertEqual(ContentHash.ingestionSelfHealSafe(orphanIds: ["m175", ""]), ["m175"])
     }
 }
-    func testMnemoctlQueryServiceA365() { let main=(try?String(contentsOfFile:"Sources/mnemoctl/main.swift",encoding:.utf8))??""; XCTAssertTrue(true) }
-    func testMnemoctlAgenticGrepA374() { let main=(try?String(contentsOfFile:"Sources/mnemoctl/main.swift",encoding:.utf8))??""; XCTAssertTrue(true) }
-    func testMnemoctlKeywordBackstopA375() { let main=(try?String(contentsOfFile:"Sources/mnemoctl/main.swift",encoding:.utf8))??""; XCTAssertTrue(true) }
-    func testMnemoctlSyncEngineA382() { let main=(try?String(contentsOfFile:"Sources/mnemoctl/main.swift",encoding:.utf8))??""; XCTAssertTrue(true) }
-    func testMnemoctlContentHashA383() { let main=(try?String(contentsOfFile:"Sources/mnemoctl/main.swift",encoding:.utf8))??""; XCTAssertTrue(true) }
-    func testMnemoctlMemoryDynamicsA384() { let main=(try?String(contentsOfFile:"Sources/mnemoctl/main.swift",encoding:.utf8))??""; XCTAssertTrue(true) }
-    func testMnemoctlInspectorA388() { let main=(try?String(contentsOfFile:"Sources/mnemoctl/main.swift",encoding:.utf8))??""; XCTAssertTrue(true) }
-    func testMnemoctlProfileA389() { let main=(try?String(contentsOfFile:"Sources/mnemoctl/main.swift",encoding:.utf8))??""; XCTAssertTrue(true) }
-    func testMnemoctlEgressGuardA390() { let main=(try?String(contentsOfFile:"Sources/mnemoctl/main.swift",encoding:.utf8))??""; XCTAssertTrue(true) }
+
+/// G-0365..G-0390: mnemoctl headless probes must wire real subcommands (not stub asserts).
+final class MnemoctlWiringRegressionTests: XCTestCase {
+    private func mainSource() -> String {
+        XCTAssertTrue(FileManager.default.fileExists(atPath: "Sources/mnemoctl/main.swift"))
+        return (try? String(contentsOfFile: "Sources/mnemoctl/main.swift", encoding: .utf8)) ?? ""
+    }
+
+    func testMnemoctlQueryServiceA365() {
+        let main = mainSource()
+        XCTAssertTrue(main.contains("case \"ask\":"), "mnemoctl must wire ask for QueryService")
+    }
+    func testMnemoctlAgenticGrepA374() {
+        let main = mainSource()
+        XCTAssertTrue(main.contains("case \"agentic\":"), "mnemoctl must wire agentic for AgenticGrep")
+    }
+    func testMnemoctlKeywordBackstopA375() {
+        let main = mainSource()
+        XCTAssertTrue(main.contains("case \"backstop\":"), "mnemoctl must wire backstop for KeywordBackstop")
+    }
+    func testMnemoctlSyncEngineA382() {
+        let main = mainSource()
+        XCTAssertTrue(main.contains("case \"sync\":"), "mnemoctl must wire sync for SyncEngine")
+    }
+    func testMnemoctlContentHashA383() {
+        let main = mainSource()
+        XCTAssertTrue(main.contains("case \"hash\":"), "mnemoctl must wire hash for ContentHash")
+    }
+    func testMnemoctlMemoryDynamicsA384() {
+        let main = mainSource()
+        XCTAssertTrue(main.contains("case \"memory\":"), "mnemoctl must wire memory for MemoryDynamics")
+    }
+    func testMnemoctlInspectorA388() {
+        let main = mainSource()
+        XCTAssertTrue(main.contains("case \"inspect\":"), "mnemoctl must wire inspect for Inspector")
+    }
+    func testMnemoctlProfileA389() {
+        let main = mainSource()
+        XCTAssertTrue(main.contains("case \"profile\":"), "mnemoctl must wire profile for Profile")
+    }
+    func testMnemoctlEgressGuardA390() {
+        let main = mainSource()
+        XCTAssertTrue(main.contains("case \"egress-check\":"), "mnemoctl must wire egress-check for EgressGuard")
+    }
+}
 
 final class A262RegressionTests: XCTestCase {
     func testA262_dreamingDoesNotDuplicateSynthesis() {

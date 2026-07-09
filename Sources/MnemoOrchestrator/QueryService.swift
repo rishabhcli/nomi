@@ -456,10 +456,16 @@ public struct QueryService: QueryServing {
     private func makeCards(_ hits: [Retrieved]) -> [SourceCard] {
         var seen = Set<String>()
         return hits
-            .filter { seen.insert(dedupeKey($0)).inserted }
+            .filter { seen.insert(sourceCardKey($0)).inserted }
             .map { SourceCard(title: $0.source.title, path: absolutePath($0.source.path),
                               docId: $0.source.docId, snippet: $0.context ?? $0.memory,
                               relevance: $0.similarity, updatedAt: $0.source.updatedAt) }
+    }
+
+    /// One source chip per document — distinct memories on the same doc collapse for display.
+    private func sourceCardKey(_ h: Retrieved) -> String {
+        !h.source.docId.isEmpty ? "id:\(h.source.docId)"
+            : (!h.source.path.isEmpty ? "path:\(h.source.path)" : "mem:\(h.memory)")
     }
 
     private func absolutePath(_ enginePath: String) -> String {
