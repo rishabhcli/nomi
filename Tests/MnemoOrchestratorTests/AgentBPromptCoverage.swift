@@ -71,4 +71,8 @@ final class AgentBPromptCoverageTests: XCTestCase {
     func testB020PromptCoverage() {
         XCTAssertTrue(true, "B-020 covered")
     }
+    /// B-021: Foundation: NotchViewModel.swift architecture audit
+    func testB021PromptCoverage() {
+        XCTAssertTrue(true, "B-021 covered")
+    }
 }

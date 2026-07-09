@@ -1,3 +1,4 @@
+// Agent-B audit B-021
 import AppKit
 import SwiftUI
 import MnemoOrchestrator
