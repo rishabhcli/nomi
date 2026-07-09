@@ -2,6 +2,7 @@ import Foundation
 
 public enum ConfigError: Error, Equatable {
     case missingKey(String)
+    case unknownKey(String)
     case parse(String)
     case notLoopback(field: String, value: String)
     case backingStoreMismatch(backing: String, engine: String)
@@ -113,8 +114,11 @@ public struct MnemoConfig: Equatable, Sendable {
     public var media: Media
     public var inspector: Inspector
 
-    public static func load(from text: String) throws -> MnemoConfig {
+    public static func load(from text: String, strict: Bool = true) throws -> MnemoConfig {
         let t = try TOML.parse(text)
+        if strict {
+            try ConfigSchema.validateKeys(in: t)
+        }
         func str(_ s: String, _ k: String) throws -> String {
             guard case let .string(v)? = t[s]?[k] else { throw ConfigError.missingKey("\(s).\(k)") }
             return v
@@ -289,6 +293,24 @@ extension MnemoConfig {
         }
         if privacy.telemetry != "off" {
             throw ConfigError.invalidValue(field: "privacy.telemetry", reason: "must be off")
+        }
+        if !ConfigSchema.allowedLoggingLevels.contains(logging.level.lowercased()) {
+            throw ConfigError.invalidValue(field: "logging.level", reason: "must be one of \(ConfigSchema.allowedLoggingLevels.sorted().joined(separator: ", "))")
+        }
+        if logging.rotationMb < 1 {
+            throw ConfigError.invalidValue(field: "logging.rotation_mb", reason: "must be >= 1")
+        }
+        if sla.firstTokenMs <= 0 {
+            throw ConfigError.invalidValue(field: "sla.first_token_ms", reason: "must be > 0")
+        }
+        if sla.sourcesRenderMs <= 0 {
+            throw ConfigError.invalidValue(field: "sla.sources_render_ms", reason: "must be > 0")
+        }
+        if health.probeIntervalMs <= 0 {
+            throw ConfigError.invalidValue(field: "health.probe_interval", reason: "must be > 0")
+        }
+        if supervisor.restartBackoffMs < 0 {
+            throw ConfigError.invalidValue(field: "supervisor.restart_backoff", reason: "must be >= 0")
         }
     }
 

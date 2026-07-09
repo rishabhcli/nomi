@@ -1,4 +1,5 @@
 import Foundation
+import MnemoCore
 
 // QueryService.swift — query lifecycle orchestrator (M4–M12).
 // Public entry points:
@@ -182,6 +183,9 @@ public struct QueryService: QueryServing {
     let documentSearchEnabled: Bool
     let conversationSink: ConversationIngesting?
     let chatRecallEnabled: Bool
+    let logSink: QueryLogSink
+    let modelId: String?
+    let egressCounter: @Sendable () -> Int
 
     public init(retriever: Retrieving, generator: Generating, spans: SpanResolver,
                 defaults: SearchDefaults, mountRoot: String, ingestIndex: IngestIndex? = nil,
@@ -202,7 +206,10 @@ public struct QueryService: QueryServing {
                 selfCorrect: Bool = false,
                 documentSearchEnabled: Bool = false,
                 conversationSink: ConversationIngesting? = nil,
-                chatRecallEnabled: Bool = false) {
+                chatRecallEnabled: Bool = false,
+                logSink: QueryLogSink = NullQueryLogSink(),
+                modelId: String? = nil,
+                egressCounter: @escaping @Sendable () -> Int = { 0 }) {
         self.chatRecallEnabled = chatRecallEnabled
         self.emptyFallback = emptyFallback
         self.tone = tone
@@ -226,23 +233,39 @@ public struct QueryService: QueryServing {
         self.effort = effort
         self.verifier = verifier
         self.strength = strength
+        self.logSink = logSink
+        self.modelId = modelId
+        self.egressCounter = egressCounter
+    }
+
+    private func finishQuery(_ tracker: inout QueryLogTracker,
+                             continuation: AsyncThrowingStream<QueryEvent, Error>.Continuation) async {
+        await tracker.emit(to: logSink, egressBlockedCount: egressCounter())
+        continuation.finish()
     }
 
     public func ask(_ q0: String, history: [Turn] = []) -> AsyncThrowingStream<QueryEvent, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
+                var tracker = QueryLogTracker(modelId: modelId)
                 do {
                     // 1. Route; escalate genuinely ambiguous queries to the model (#4).
                     let routing = router.classify(q0)
                     var intent = routing.intent
-                    continuation.yield(.routed(intent: intent.rawValue, effort: effort.forIntent(intent)))
                     for event in routing.ambiguityEvents() { continuation.yield(event) }
                     if routing.ambiguous, let escalator { intent = await escalator.classify(q0) }
+                    let effortTier = effort.forIntent(intent)
+                    tracker.noteRouted(intent: intent.rawValue, effort: effortTier)
+                    continuation.yield(.routed(intent: intent.rawValue, effort: effortTier))
 
                     // Out-of-scope / chit-chat (#9): reply plainly, skip retrieval.
                     if !ScopeClassifier.isCorpusQuestion(q0) {
                         continuation.yield(.token(ScopeClassifier.reply(for: q0)))
-                        continuation.yield(.done); continuation.finish(); return
+                        tracker.noteFirstToken()
+                        tracker.noteTerminal("outOfScope")
+                        continuation.yield(.done)
+                        await finishQuery(&tracker, continuation: continuation)
+                        return
                     }
 
                     // Answer cache (#7): instant repeat, invalidated on corpus change.
@@ -251,8 +274,10 @@ public struct QueryService: QueryServing {
                        let cached = await cache.lookup(query: q0, container: defaults.container ?? "", corpusVersion: corpusVersion) {
                         continuation.yield(.sources(cached.sources))
                         continuation.yield(.token(cached.answer))
+                        tracker.noteFirstToken()
+                        tracker.noteTerminal("cached")
                         continuation.yield(.done)
-                        continuation.finish()
+                        await finishQuery(&tracker, continuation: continuation)
                         return
                     }
 
@@ -282,15 +307,17 @@ public struct QueryService: QueryServing {
                             await index.refresh()
                             if let pending = await index.pendingPaths().first {
                                 continuation.yield(.state(.indexing(path: pending)))
+                                tracker.noteTerminal("indexing")
                                 continuation.yield(.done)
-                                continuation.finish()
+                                await finishQuery(&tracker, continuation: continuation)
                                 return
                             }
                             // First-run: no files at all → onboarding, not a refusal.
                             if await index.documentCount == 0 {
                                 continuation.yield(.state(.emptyCorpus))
+                                tracker.noteTerminal("emptyCorpus")
                                 continuation.yield(.done)
-                                continuation.finish()
+                                await finishQuery(&tracker, continuation: continuation)
                                 return
                             }
                         }
@@ -305,13 +332,15 @@ public struct QueryService: QueryServing {
                                 SourceCard(title: $0.source.title, path: absolutePath($0.source.path), docId: $0.source.docId)
                             }.filter { seenN.insert($0.docId).inserted }
                             for event in CorpusSuggester.emptyEvidenceEvents(nearest: cards) { continuation.yield(event) }
+                            tracker.noteTerminal("emptyNearest")
                             continuation.yield(.done)
-                            continuation.finish()
+                            await finishQuery(&tracker, continuation: continuation)
                             return
                         }
                         for event in Coverage.emptyEvidenceEvents() { continuation.yield(event) }
+                        tracker.noteTerminal("empty")
                         continuation.yield(.done)
-                        continuation.finish()
+                        await finishQuery(&tracker, continuation: continuation)
                         return
                     }
                     // Literal-keyword backstop: if a salient query term never
@@ -394,6 +423,8 @@ public struct QueryService: QueryServing {
                     if !numericNote.isEmpty { steps.append("Computed a figure from the dated facts") }
                     steps.append("Answering at \(genEffort) effort")
                     continuation.yield(.reasoning(steps))
+                    tracker.noteReasoningStep()
+                    tracker.noteContextTokens(assembled.evidence.reduce(0) { $0 + $1.memory.count / 4 })
                     let convo = Prompt.conversation(history)
                     let basePrompt = "\(convo)\(Prompt.context(assembled.evidence))\(conflictNote)\(numericNote)\n\nQuestion: \(q0)"
 
@@ -403,6 +434,7 @@ public struct QueryService: QueryServing {
                         var text = ""
                         for try await tok in generator.stream(system: system, prompt: basePrompt) {
                             text += tok
+                            tracker.noteFirstToken()
                             continuation.yield(.token(tok))
                         }
                         return text
@@ -422,8 +454,20 @@ public struct QueryService: QueryServing {
 
                     // 5. Emit verification flags; wholly-ungrounded → defined state.
                     if let verifier, let v = verdicts {
-                        for event in verifier.citationEvents(v) { continuation.yield(event) }
-                        if CitationVerifier.allUnsupported(v) { continuation.yield(.state(.unsupportedAnswer)) }
+                        for event in verifier.citationEvents(v) {
+                            if case let .citation(_, supported) = event {
+                                tracker.noteCitation(supported: supported)
+                            }
+                            continuation.yield(event)
+                        }
+                        if CitationVerifier.allUnsupported(v) {
+                            continuation.yield(.state(.unsupportedAnswer))
+                            tracker.noteTerminal("unsupportedAnswer")
+                        } else {
+                            tracker.noteTerminal("answered")
+                        }
+                    } else {
+                        tracker.noteTerminal("answered")
                     }
 
                     // 6. Entities to explore (#8) + follow-up suggestions (expressive #6).
@@ -448,14 +492,15 @@ public struct QueryService: QueryServing {
                             container: chatContainer)
                     }
                     continuation.yield(.done)
-                    continuation.finish()
+                    await finishQuery(&tracker, continuation: continuation)
                 } catch is CancellationError {
                     continuation.yield(.done)
-                    continuation.finish()
+                    await finishQuery(&tracker, continuation: continuation)
                 } catch {
                     for event in Self.lifecycleRetryEvents(for: error) { continuation.yield(event) }
+                    tracker.noteTerminal(Self.terminalLogLabel(for: error))
                     continuation.yield(.done)
-                    continuation.finish()
+                    await finishQuery(&tracker, continuation: continuation)
                 }
             }
             continuation.onTermination = { _ in task.cancel() }
@@ -500,5 +545,15 @@ public struct QueryService: QueryServing {
             terminal = .engineUnreachable
         }
         return [.retrying("That didn't work — try asking again."), .state(terminal)]
+    }
+
+    private static func terminalLogLabel(for error: Error) -> String {
+        switch error {
+        case let ollama as OllamaError:
+            if case .server(let msg) = ollama, msg.lowercased().contains("model") { return "modelNotLoaded" }
+            return "engineUnreachable"
+        case is EngineError: return "engineUnreachable"
+        default: return "engineUnreachable"
+        }
     }
 }

@@ -102,5 +102,7 @@ func runEgressCheck(config: MnemoConfig) async {
     print("loopback through guarded session: \(engineUp ? "OK" : "unreachable")")
 }
 
-/// Build structured log entry from query events (mnemoctl ask path).
-func makeLogSink() -> FileQueryLogSink { FileQueryLogSink() }
+/// Build structured log sink from config (mnemoctl ask path).
+func makeLogSink(config: MnemoConfig) -> QueryLogSink {
+    QueryLogSinkFactory.make(config: config.logging)
+}

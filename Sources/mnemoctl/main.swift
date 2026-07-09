@@ -77,6 +77,7 @@ case "ask":
                               model: config.model.synthesis,
                               keepAlive: config.model.keepAlive)
     let verify = CommandLine.arguments.contains("--verify")
+    let logSink = makeLogSink(config: config)
     let service = QueryService(
         retriever: engine,
         generator: ollama,
@@ -96,33 +97,26 @@ case "ask":
         verifier: verify ? CitationVerifier(backend: LocalVerificationBackend(generator: ollama)) : nil,
         documentSearchEnabled: true,
         conversationSink: engine,
-        chatRecallEnabled: true)
-    let logSink = makeLogSink()
+        chatRecallEnabled: true,
+        logSink: logSink,
+        modelId: config.model.synthesis,
+        egressCounter: { LoopbackGuardURLProtocol.blockedCount })
     func runAsk(_ question: String, history: [Turn]) async throws -> String {
         var sawToken = false
         var answer = ""
-        var entry = QueryLogEntry()
-        entry.modelId = config.model.synthesis
         let t0 = Date()
-        var hopCount = 0
-        var verified = 0
-        var checked = 0
+        var sourcesMs: Int?
         for try await event in service.ask(question, history: history) {
             switch event {
             case .routed(let intent, let effort):
-                entry.routeIntent = intent
-                entry.effortTier = effort
                 if MnemoCLI.verbose { print("[route] \(intent) (effort: \(effort))") }
                 else { print("[route] \(intent) (effort: \(effort))") }
             case .understanding(let phrase):
                 if MnemoCLI.verbose { print("[understanding] \(phrase)") }
             case .sources(let cards):
-                // Event-order proof for AT-M1.4: this line must print before any token.
+                sourcesMs = Int(Date().timeIntervalSince(t0) * 1000)
                 print("[sources] \(cards.map { "\($0.title) <\($0.path)>" }.joined(separator: ", "))")
             case .token(let t):
-                if entry.firstTokenMs == nil {
-                    entry.firstTokenMs = Int(Date().timeIntervalSince(t0) * 1000)
-                }
                 if !sawToken { print("[answer] ", terminator: ""); sawToken = true }
                 print(t, terminator: "")
                 fflush(stdout)
@@ -132,28 +126,25 @@ case "ask":
             case .entities(let ents):
                 if MnemoCLI.verbose { print("\n[entities] \(ents.joined(separator: " · "))") }
             case .reasoning(let steps):
-                hopCount += 1
                 if MnemoCLI.verbose { print("[reasoning] \(steps.joined(separator: " → "))") }
             case .citation(let idx, let supported):
-                checked += 1
-                if supported { verified += 1 }
                 if !supported { print("\n[citation] sentence \(idx): UNSUPPORTED") }
             case .suggestions(let chips):
                 if MnemoCLI.verbose { print("\n[follow-ups] \(chips.joined(separator: " · "))") }
             case .related(let docs):
                 if MnemoCLI.verbose { print("[see also] \(docs.map(\.title).joined(separator: " · "))") }
             case .state(let terminal):
-                entry.terminalState = String(describing: terminal)
                 print("[state] \(terminal): \(NotchReducer.message(for: terminal))")
             case .done:
                 print("\n[done]")
             }
         }
-        entry.retrievalHopCount = hopCount
-        entry.totalMs = Int(Date().timeIntervalSince(t0) * 1000)
-        entry.egressBlockedCount = LoopbackGuardURLProtocol.blockedCount
-        if checked > 0 { entry.verificationPassRate = Double(verified) / Double(checked) }
-        await logSink.emit(entry)
+        if let sourcesMs {
+            let gate = SLAGate.checkSourcesRender(observedMs: sourcesMs, config: config)
+            if MnemoCLI.verbose || !gate.passed {
+                print("[sla] \(gate.metric)=\(gate.observedMs)ms limit=\(gate.limitMs)ms pass=\(gate.passed)")
+            }
+        }
         return answer
     }
     do {
@@ -390,6 +381,18 @@ case "inspect":
     }
 case "egress-check":
     await runEgressCheck(config: config)
+case "stack-report":
+    let bundle = SupervisorLogAggregator.collect(maxLines: 30)
+    if let line = try? bundle.jsonLine() { print(line) }
+    let smfs = SMFSHealth.check(mountPoint: config.smfs.mountPoint,
+                                boundAddress: await launcher.boundAddress(.smfs))
+    print("smfs_health mounted=\(smfs.mounted) loopback=\(smfs.loopback) path=\(smfs.mountPoint)")
+case "logs":
+    let bundle = SupervisorLogAggregator.collect(maxLines: 20)
+    print("=== supervisor ===")
+    bundle.supervisorLines.forEach { print($0) }
+    print("=== app.jsonl ===")
+    bundle.appJSONLLines.forEach { print($0) }
 case "bench":
     // Latency SLO report (M11): first-token + total, warm-model check, and the
     // same run with a background ingest hammering the engine (no-stall check).
@@ -427,8 +430,14 @@ case "bench":
     loadTask.cancel()
     func p95(_ xs: [Double]) -> Double { xs.sorted()[min(xs.count - 1, Int(Double(xs.count) * 0.95))] }
     let idleFirst = idle.map(\.first), loadFirst = underLoad.map(\.first)
+    let idleFirstMs = idleFirst.map { Int($0 * 1000) }
+    let loadFirstMs = loadFirst.map { Int($0 * 1000) }
     print("--- SLO report ---")
     print("first-token P95 idle=\(Int(p95(idleFirst)*1000))ms  underLoad=\(Int(p95(loadFirst)*1000))ms  (SLA \(config.sla.firstTokenMs)ms)")
+    let gateIdle = SLAGate.regressionFailed(samplesMs: idleFirstMs, limitMs: config.sla.firstTokenMs)
+    let gateLoad = SLAGate.regressionFailed(samplesMs: loadFirstMs, limitMs: config.sla.firstTokenMs)
+    print("first_token_ms regression gate idle=\(gateIdle ? "FAIL" : "PASS") load=\(gateLoad ? "FAIL" : "PASS")")
+    if gateIdle || gateLoad { exit(1) }
     let warm = idleFirst.dropFirst().allSatisfy { $0 < (idleFirst.first ?? 0) * 3 + 2 }
     print("warm-model (no cold-load spike on later queries): \(warm ? "OK" : "REVIEW")")
 case "containers":

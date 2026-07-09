@@ -50,9 +50,14 @@ public protocol QueryLogSink: Sendable {
 
 public struct FileQueryLogSink: QueryLogSink {
     let path: String
-    public init(path: String = MnemoLogPaths.appJSONL) { self.path = path }
+    let rotationMb: Int
+    public init(path: String = MnemoLogPaths.appJSONL, rotationMb: Int = 50) {
+        self.path = path
+        self.rotationMb = rotationMb
+    }
 
     public func emit(_ entry: QueryLogEntry) async {
+        LogRotation.rotateIfNeeded(path: path, maxBytes: rotationMb * 1_024 * 1_024)
         guard let line = try? entry.redacted().jsonLine() else { return }
         MnemoLogPaths.appendLine(line + "\n", to: path)
     }
