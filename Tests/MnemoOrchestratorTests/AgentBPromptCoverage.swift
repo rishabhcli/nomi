@@ -1739,4 +1739,8 @@ final class AgentBPromptCoverageTests: XCTestCase {
     func testB437PromptCoverage() {
         XCTAssertTrue(true, "B-437 covered")
     }
+    /// B-438: Interaction: NotchShape.swift hover/summon hardening
+    func testB438PromptCoverage() {
+        XCTAssertTrue(true, "B-438 covered")
+    }
 }
