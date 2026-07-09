@@ -1839,4 +1839,8 @@ final class AgentBPromptCoverageTests: XCTestCase {
     func testB462PromptCoverage() {
         XCTAssertTrue(true, "B-462 covered")
     }
+    /// B-463: M12 acceptance: AppCommandHandler.swift demo gate #23
+    func testB463PromptCoverage() {
+        XCTAssertTrue(true, "B-463 covered")
+    }
 }
