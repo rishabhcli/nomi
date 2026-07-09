@@ -89,22 +89,7 @@ public enum NotchReducer {
         public static func indexingTerminalState(path: String) -> TerminalState { .indexing(path: path) }
         public static func ingestionSelfHealSafe(orphanIds: [String]) -> [String] { orphanIds.filter { !$0.isEmpty } }
 
-    // A-184: ingestion
-    // MARK: - Ingestion reliability (M2)
-        public static func indexingTerminalState(path: String) -> TerminalState { .indexing(path: path) }
-        public static func ingestionSelfHealSafe(orphanIds: [String]) -> [String] { orphanIds.filter { !$0.isEmpty } }
 
-    // A-132: grounding
-    // MARK: - Citation integrity (M5)
-        public static func citationIntegritySupported(_ sentence: String, evidence: [Retrieved]) -> Bool {
-            let claim = Verification.stripCitations(sentence).trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !claim.isEmpty else { return true }
-            let corpus = evidence.map { $0.memory.lowercased() }.joined(separator: " ")
-            let tokens = claim.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).filter { $0.count > 3 }
-            guard !tokens.isEmpty else { return true }
-            return tokens.allSatisfy { corpus.contains($0) }
-        }
-        public static func unsupportedAnswerEvents() -> [QueryEvent] { [.state(.unsupportedAnswer)] }
 
     // A-236: memory
     // MARK: - Memory dynamics (M6)
@@ -124,8 +109,8 @@ public enum NotchReducer {
         var s = state
         switch event {
         case .routed:
-            // Start of a query: clear any transient state left over from the
-            // previous answer so a follow-up never renders stale output.
+            // Start of a query: clear answer state but preserve routing reasoning.
+            let priorReasoning = s.reasoning
             s.phase = .searching
             s.answer = ""
             s.sources = []
@@ -136,12 +121,12 @@ public enum NotchReducer {
             s.suggestions = []
             s.related = []
             s.entities = []
-            s.reasoning = []
+            s.reasoning = priorReasoning
             s.feedback = nil
         case .related(let docs):
             s.related = docs
         case .reasoning(let steps):
-            s.reasoning = steps
+            s.reasoning.append(contentsOf: steps)
         case .entities(let ents):
             s.entities = ents
         case .retrying(let reason):

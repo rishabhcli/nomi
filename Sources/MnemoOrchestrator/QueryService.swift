@@ -117,6 +117,12 @@ public struct QueryService: QueryServing {
     public static func indexingTerminalState(path: String) -> TerminalState { .indexing(path: path) }
     public static func ingestionSelfHealSafe(orphanIds: [String]) -> [String] { orphanIds.filter { !$0.isEmpty } }
 
+    /// Renderable offline refusal when no network path is available (Phase 2 / M12).
+    public static func offlineRefusalEvents() -> [QueryEvent] {
+        [.reasoning(["Answers come only from your local files — no network path used"]),
+         .state(.engineUnreachable)]
+    }
+
     // A-313: intelligence
     // MARK: - Expressiveness (beats-Siri offline)
         /// Shapes cross-doc synthesis as timeline/table/bullets for offline rendering.
@@ -487,9 +493,12 @@ public struct QueryService: QueryServing {
                     }
                     continuation.yield(.done)
                     await finishQuery(&tracker, continuation: continuation)
+                } catch is CancellationError {
+                    continuation.yield(.done)
+                    await finishQuery(&tracker, continuation: continuation)
                 } catch {
-                    for event in Self.lifecycleRetryEvents() { continuation.yield(event) }
-                    tracker.noteTerminal("engineUnreachable")
+                    for event in Self.lifecycleRetryEvents(for: error) { continuation.yield(event) }
+                    tracker.noteTerminal(Self.terminalLogLabel(for: error))
                     continuation.yield(.done)
                     await finishQuery(&tracker, continuation: continuation)
                 }
@@ -508,8 +517,10 @@ public struct QueryService: QueryServing {
     }
 
     private func absolutePath(_ enginePath: String) -> String {
-        guard !enginePath.isEmpty, !mountRoot.isEmpty, enginePath.hasPrefix("/") else { return enginePath }
-        return mountRoot + enginePath
+        guard !enginePath.isEmpty, !mountRoot.isEmpty else { return enginePath }
+        if enginePath.hasPrefix("/") { return mountRoot + enginePath }
+        let root = mountRoot.hasSuffix("/") ? String(mountRoot.dropLast()) : mountRoot
+        return root + "/" + enginePath
     }
 
     /// Renderable events when the query path throws instead of finishing silently (A-105).
@@ -518,7 +529,31 @@ public struct QueryService: QueryServing {
         "mnemo-\(UInt(bitPattern: query.hashValue))"
     }
 
-    private static func lifecycleRetryEvents() -> [QueryEvent] {
-        [.retrying("That didn't work — try asking again."), .state(.engineUnreachable)]
+    private static func lifecycleRetryEvents(for error: Error) -> [QueryEvent] {
+        let terminal: TerminalState
+        switch error {
+        case let ollama as OllamaError:
+            switch ollama {
+            case .server(let msg) where msg.lowercased().contains("model"):
+                terminal = .modelNotLoaded(model: msg)
+            default:
+                terminal = .engineUnreachable
+            }
+        case is EngineError:
+            terminal = .engineUnreachable
+        default:
+            terminal = .engineUnreachable
+        }
+        return [.retrying("That didn't work — try asking again."), .state(terminal)]
+    }
+
+    private static func terminalLogLabel(for error: Error) -> String {
+        switch error {
+        case let ollama as OllamaError:
+            if case .server(let msg) = ollama, msg.lowercased().contains("model") { return "modelNotLoaded" }
+            return "engineUnreachable"
+        case is EngineError: return "engineUnreachable"
+        default: return "engineUnreachable"
+        }
     }
 }

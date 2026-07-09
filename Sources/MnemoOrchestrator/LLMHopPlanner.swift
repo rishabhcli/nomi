@@ -7,8 +7,10 @@ import Foundation
 /// one short call per hop). The loop's hard cap in AgenticGrep bounds cost.
 public struct LLMHopPlanner: HopPlanning {
     // A-124: grounding
-    public static func citationIntegritySupported(_ s: String, evidence: [Retrieved]) -> Bool { !Verification.stripCitations(s).isEmpty }
-    public static func unsupportedAnswerEvents() -> [QueryEvent] { [.state(.unsupportedAnswer)] }
+    public static func citationIntegritySupported(_ s: String, evidence: [Retrieved]) -> Bool {
+        GroundingCheck.citationIntegritySupported(s, evidence: evidence)
+    }
+    public static func unsupportedAnswerEvents() -> [QueryEvent] { GroundingCheck.unsupportedAnswerEvents() }
 
     // A-324: latency
     // MARK: - Scheduling (M11)
@@ -87,7 +89,7 @@ public struct LLMHopPlanner: HopPlanning {
     }
 
     /// Extracts the decision JSON from raw model output (tolerates fences/prose).
-    static func parse(_ raw: String) -> HopDecision {
+    static func parse(_ raw: String, question: String = "", priorHops: [HopTrace] = []) -> HopDecision {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         var candidate = text
         if let start = text.firstIndex(of: "{"), let end = text.lastIndex(of: "}") {
@@ -99,10 +101,30 @@ public struct LLMHopPlanner: HopPlanning {
         }
         let why = wire.rationale ?? ""
         switch wire.action {
-        case "semantic": return wire.query.map { .semantic($0, rationale: why) } ?? .stop(rationale: why)
-        case "literal": return wire.query.map { .literal($0, rationale: why) } ?? .stop(rationale: why)
+        case "semantic":
+            guard let q = wire.query, !isNumericDistractor(q, question: question), !isRepeatedHop(q, hops: priorHops) else {
+                return .stop(rationale: why.isEmpty ? "rejected hop" : why)
+            }
+            return .semantic(q, rationale: why)
+        case "literal":
+            guard let q = wire.query, !isRepeatedHop(q, hops: priorHops) else {
+                return .stop(rationale: why.isEmpty ? "rejected hop" : why)
+            }
+            return .literal(q, rationale: why)
         default: return .stop(rationale: why.isEmpty ? "planner chose stop" : why)
         }
+    }
+
+    /// Pure-numeric hop queries are distractors when the question has no digits.
+    static func isNumericDistractor(_ query: String, question: String = "") -> Bool {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.allSatisfy({ $0.isNumber || $0 == "." || $0 == "," }) else { return false }
+        return question.filter(\.isNumber).isEmpty
+    }
+
+    static func isRepeatedHop(_ query: String, hops: [HopTrace]) -> Bool {
+        let q = query.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        return hops.contains { $0.query.lowercased().trimmingCharacters(in: .whitespacesAndNewlines) == q }
     }
 
     public func nextHop(question: String, evidence: [Retrieved], hops: [HopTrace]) async -> HopDecision {
@@ -127,6 +149,6 @@ public struct LLMHopPlanner: HopPlanning {
         } catch {
             return .stop(rationale: "planner error: \(error)")
         }
-        return Self.parse(raw)
+        return Self.parse(raw, question: question, priorHops: hops)
     }
 }

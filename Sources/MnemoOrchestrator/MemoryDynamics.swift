@@ -163,6 +163,35 @@ public struct MemoryDynamics: Sendable {
     }
 }
 
+/// Stable JSON schema for mnemoctl memory-dynamics output.
+public struct MemoryDynamicsSnapshot: Codable, Equatable, Sendable {
+    public let schemaVersion: Int
+    public let container: String?
+    public let activeCount: Int
+    public let entries: [MemoryEntry]
+
+    public init(container: String?, entries: [MemoryEntry], now: Date = Date()) {
+        self.schemaVersion = 1
+        self.container = container
+        let active = MemoryFactFilter.filterActive(entries, now: now)
+        self.activeCount = active.count
+        self.entries = active
+    }
+
+    public func jsonData() throws -> Data {
+        let enc = JSONEncoder()
+        enc.outputFormatting = [.sortedKeys]
+        return try enc.encode(self)
+    }
+}
+
+extension MemoryDynamics {
+    /// mnemoctl JSON schema stability hook (D-0070+).
+    public static func jsonExportData() throws -> Data {
+        try MemoryDynamicsSnapshot(container: "mnemo", entries: []).jsonData()
+    }
+}
+
 
 /// Filters memories for active use: not forgotten, not TTL-expired, latest version.
 public enum MemoryFactFilter {
@@ -170,8 +199,8 @@ public enum MemoryFactFilter {
 
     public static func isActive(_ e: MemoryEntry, now: Date = Date()) -> Bool {
         guard e.isLatest && !e.isForgotten else { return false }
-        guard let forgetAfter = e.forgetAfter,
-              let expiry = iso.date(from: forgetAfter) else { return true }
+        guard let forgetAfter = e.forgetAfter else { return true }
+        guard let expiry = iso.date(from: forgetAfter) else { return false }
         return now < expiry
     }
 

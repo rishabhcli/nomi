@@ -143,8 +143,9 @@ public struct CitationVerifier: Sendable {
         // verification latency is ~the slowest sentence, not the sum of all.
         func verdict(_ i: Int, _ sentence: String) async -> SentenceVerdict {
             let claim = Verification.stripCitations(sentence).trimmingCharacters(in: .whitespacesAndNewlines)
-            // Skip pure questions / connective fragments (nothing to ground).
-            if claim.count < 3 { return SentenceVerdict(index: i, text: sentence, supported: true, bestSource: nil) }
+            if Self.isTrivialFragment(claim) {
+                return SentenceVerdict(index: i, text: sentence, supported: true, bestSource: nil)
+            }
             // Best single chunk by similarity drives the citation + gates entailment.
             var bestSim = 0.0
             var bestSource: SourceLocator?
@@ -186,7 +187,27 @@ public struct CitationVerifier: Sendable {
     /// Every non-trivial sentence unsupported → the answer is ungrounded (M12
     /// `unsupported_answer` terminal state).
     public static func allUnsupported(_ verdicts: [SentenceVerdict]) -> Bool {
-        let real = verdicts.filter { $0.text.count >= 3 }
+        let real = verdicts.filter { !isTrivialFragment(Verification.stripCitations($0.text)) }
         return !real.isEmpty && real.allSatisfy { !$0.supported }
+    }
+
+    /// Partial grounding failure — router should escalate verification effort, not silently pass.
+    public static func needsRouterEscalation(_ verdicts: [SentenceVerdict]) -> Bool {
+        let real = verdicts.filter { !isTrivialFragment(Verification.stripCitations($0.text)) }
+        guard real.count >= 2 else { return false }
+        let unsupported = real.filter { !$0.supported }.count
+        return unsupported > 0 && unsupported < real.count
+    }
+
+    public static func routerEscalationEvents(_ verdicts: [SentenceVerdict]) -> [QueryEvent] {
+        guard needsRouterEscalation(verdicts) else { return [] }
+        return [.reasoning(["Partial grounding — escalating verification before answering"])]
+    }
+
+    static func isTrivialFragment(_ claim: String) -> Bool {
+        let t = claim.trimmingCharacters(in: .whitespacesAndNewlines)
+        if t.isEmpty { return true }
+        if t.count < 3 { return true }
+        return t.allSatisfy { !$0.isLetter && !$0.isNumber }
     }
 }

@@ -38,17 +38,6 @@ public actor WorkScheduler {
         public static func indexingTerminalState(path: String) -> TerminalState { .indexing(path: path) }
         public static func ingestionSelfHealSafe(orphanIds: [String]) -> [String] { orphanIds.filter { !$0.isEmpty } }
 
-    // A-131: grounding
-    // MARK: - Citation integrity (M5)
-        public static func citationIntegritySupported(_ sentence: String, evidence: [Retrieved]) -> Bool {
-            let claim = Verification.stripCitations(sentence).trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !claim.isEmpty else { return true }
-            let corpus = evidence.map { $0.memory.lowercased() }.joined(separator: " ")
-            let tokens = claim.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).filter { $0.count > 3 }
-            guard !tokens.isEmpty else { return true }
-            return tokens.allSatisfy { corpus.contains($0) }
-        }
-        public static func unsupportedAnswerEvents() -> [QueryEvent] { [.state(.unsupportedAnswer)] }
 
     // A-235: memory
     // MARK: - Memory dynamics (M6)
@@ -65,20 +54,21 @@ public actor WorkScheduler {
         }
 
     public struct Token: Equatable, Sendable { let id: UUID }
-    private var interactiveInFlight = 0
+    private var interactiveTokens = Set<UUID>()
 
     public init() {}
 
     public func beginInteractive() -> Token {
-        interactiveInFlight += 1
-        return Token(id: UUID())
+        let token = Token(id: UUID())
+        interactiveTokens.insert(token.id)
+        return token
     }
     public func endInteractive(_ token: Token) {
-        interactiveInFlight = max(0, interactiveInFlight - 1)
+        interactiveTokens.remove(token.id)
     }
 
     /// True whenever any interactive query is running — the preemption signal.
-    public var shouldBackgroundYield: Bool { interactiveInFlight > 0 }
+    public var shouldBackgroundYield: Bool { !interactiveTokens.isEmpty }
 
     /// Runs interactive work with lifecycle tracking so background yields.
     public func runInteractive<T: Sendable>(_ op: @Sendable () async throws -> T) async rethrows -> T {

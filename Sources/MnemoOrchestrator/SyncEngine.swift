@@ -52,17 +52,6 @@ public struct SyncEngine: Sendable {
     public static func indexingTerminalState(path: String) -> TerminalState { .indexing(path: path) }
     public static func ingestionSelfHealSafe(orphanIds: [String]) -> [String] { orphanIds.filter { !$0.isEmpty } }
 
-    // A-122: grounding
-    // MARK: - Citation integrity (M5)
-        public static func citationIntegritySupported(_ sentence: String, evidence: [Retrieved]) -> Bool {
-            let claim = Verification.stripCitations(sentence).trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !claim.isEmpty else { return true }
-            let corpus = evidence.map { $0.memory.lowercased() }.joined(separator: " ")
-            let tokens = claim.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).filter { $0.count > 3 }
-            guard !tokens.isEmpty else { return true }
-            return tokens.allSatisfy { corpus.contains($0) }
-        }
-        public static func unsupportedAnswerEvents() -> [QueryEvent] { [.state(.unsupportedAnswer)] }
 
     // A-174: ingestion
     // MARK: - Ingestion reliability (M2)
@@ -119,5 +108,20 @@ public struct SyncEngine: Sendable {
             try await store.forgetMemory(id: id, reason: RetireReason.sourceDeleted.text, container: container)
         }
         return orphans.count
+    }
+
+    /// Every TerminalState case maps to a defined, renderable event sequence.
+    public static func terminalLifecycleEvents(_ terminal: TerminalState) -> [QueryEvent] {
+        [.state(terminal), .token(NotchReducer.message(for: terminal))]
+    }
+
+    public static func allTerminalStates() -> [TerminalState] {
+        [.indexing(path: ""), .empty(nearest: []), .emptyCorpus,
+         .modelNotLoaded(model: ""), .engineUnreachable, .unsupportedAnswer]
+    }
+
+    /// Exhaustiveness guard: every terminal state must produce non-empty UI text.
+    public static func terminalStatesExhaustive() -> Bool {
+        allTerminalStates().allSatisfy { !NotchReducer.message(for: $0).isEmpty }
     }
 }

@@ -100,7 +100,7 @@ public struct HeuristicRouter: QueryRouter {
         let hasSynth = Self.synthesisCues.contains { s.contains($0) }
         let wordCount = q.split(whereSeparator: { $0 == " " }).count
         let looksLookup = Self.lookupLeads.contains { s.contains(" \($0) ") || s.hasPrefix(" \($0) ") }
-            && wordCount <= 10
+            && wordCount <= 16
 
         // Multihop is the strongest signal (comparison across docs).
         if hasMulti {

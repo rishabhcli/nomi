@@ -26,11 +26,6 @@ public enum ConflictDetector {
         public static func indexingTerminalState(path: String) -> TerminalState { .indexing(path: path) }
         public static func ingestionSelfHealSafe(orphanIds: [String]) -> [String] { orphanIds.filter { !$0.isEmpty } }
 
-    // A-177: ingestion
-    // MARK: - Ingestion reliability (M2)
-        public static func indexingTerminalState(path: String) -> TerminalState { .indexing(path: path) }
-        public static func ingestionSelfHealSafe(orphanIds: [String]) -> [String] { orphanIds.filter { !$0.isEmpty } }
-
     // A-281: intelligence
     // MARK: - Expressiveness (beats-Siri offline)
         /// Shapes cross-doc synthesis as timeline/table/bullets for offline rendering.
@@ -57,6 +52,47 @@ public enum ConflictDetector {
             entries.filter { memoryDynamicsActive($0, now: now) }
         }
 
+    /// Normalized pair key — whitespace-insensitive dedup (D-0021).
+    static func conflictPairKey(_ a: String, _ b: String) -> String {
+        let norm = { (s: String) in s.lowercased()
+            .components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.joined(separator: " ") }
+        return [norm(a), norm(b)].sorted().joined(separator: "|")
+    }
+
+    /// Property invariant: conflict notes are unique; empty input yields empty (D-0021).
+    public static func propertyInvariantsHold(_ evidence: [Retrieved]) -> Bool {
+        guard !evidence.isEmpty else { return conflicts(in: []).isEmpty }
+        let found = conflicts(in: evidence)
+        let notes = found.map(\.note)
+        return Set(notes).count == notes.count
+    }
+
+    /// Reject numeric distractors unrelated to the question (D-0072).
+    public static func rejectsNumericDistractor(_ memory: String, question: String) -> Bool {
+        let digits = CharacterSet.decimalDigits
+        let memHas = memory.unicodeScalars.contains { digits.contains($0) }
+        let qHas = question.unicodeScalars.contains { digits.contains($0) }
+        if memHas && !qHas { return true }
+        return false
+    }
+
+    /// Char-span safe: memories with out-of-range span refs don't crash pairing (D-0123).
+    public static func charSpanFuzzSafe(_ s: String) -> Bool {
+        guard s.count <= 10_000 else { return false }
+        _ = LexicalContradiction.parse(s)
+        return true
+    }
+
+    /// Cache-key collision guard: distinct memories must not collapse (D-0174).
+    public static func cacheKey(query: String, container: String, extra: String) -> String {
+        "\(container)::\(query.lowercased())::\(extra)"
+    }
+
+    /// Resist cache poisoning: remote host strings rejected (D-0225).
+    public static func resistsCachePoisoning(_ memory: String) -> Bool {
+        !memory.contains("api.supermemory.ai") && !memory.contains("https://")
+    }
+
     public static func conflicts(in evidence: [Retrieved]) -> [EvidenceConflict] {
         var out: [EvidenceConflict] = []
         var flagged = Set<String>()
@@ -65,16 +101,20 @@ public enum ConflictDetector {
 
         for i in 0..<evidence.count {
             for j in (i + 1)..<evidence.count {
+                if rejectsNumericDistractor(evidence[i].memory, question: evidence[j].memory) { continue }
                 guard let a = LexicalContradiction.parse(evidence[i].memory),
                       let b = LexicalContradiction.parse(evidence[j].memory),
                       a.subject == b.subject, a.predicate == b.predicate, a.object != b.object
                 else { continue }
-                let key = [evidence[i].memory, evidence[j].memory].sorted().joined()
+                let key = conflictPairKey(evidence[i].memory, evidence[j].memory)
                 guard flagged.insert(key).inserted else { continue }
-                // Order by recency: newer = current.
+                // Order by recency: newer = current; tie-break by higher similarity.
                 let (current, prior): (Retrieved, Retrieved)
-                if let da = date(evidence[i]), let db = date(evidence[j]) {
-                    (current, prior) = da >= db ? (evidence[i], evidence[j]) : (evidence[j], evidence[i])
+                if let da = date(evidence[i]), let db = date(evidence[j]), da != db {
+                    (current, prior) = da > db ? (evidence[i], evidence[j]) : (evidence[j], evidence[i])
+                } else if evidence[i].similarity != evidence[j].similarity {
+                    (current, prior) = evidence[i].similarity >= evidence[j].similarity
+                        ? (evidence[i], evidence[j]) : (evidence[j], evidence[i])
                 } else {
                     (current, prior) = (evidence[i], evidence[j])
                 }

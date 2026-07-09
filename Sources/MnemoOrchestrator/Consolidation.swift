@@ -212,4 +212,9 @@ enum Cluster {
             .components(separatedBy: CharacterSet.alphanumerics.inverted)
             .filter { $0.count > 3 && !stop.contains($0) }
     }
+    /// Phase 2: agentic grep deadlock prevention (D-0751+).
+    public static func agenticDeadlockSafe(hopQueries: [String]) -> Bool {
+        Phase2Techniques.agenticDeadlockSafe(hopQueries: hopQueries)
+    }
+
 }

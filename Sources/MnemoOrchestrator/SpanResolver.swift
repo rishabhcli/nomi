@@ -87,6 +87,15 @@ public struct SpanResolver: Sendable {
         self.chunkProvider = chunkProvider
     }
 
+    /// Confidence that a char span is not a false positive (word-overlap ratio).
+    static func spanConfidence(chunk: String, matchedText: String) -> Double {
+        let words = chunk.split(whereSeparator: \.isWhitespace)
+        guard words.count >= 2 else { return 0 }
+        let matched = matchedText.lowercased()
+        let hits = words.filter { matched.contains($0.lowercased()) }.count
+        return Double(hits) / Double(words.count)
+    }
+
     public func resolve(_ hits: [Retrieved]) async -> [Retrieved] {
         var cache: [String: DocumentRecord?] = [:]
         var out: [Retrieved] = []
@@ -105,8 +114,11 @@ public struct SpanResolver: Sendable {
                 }
                 if let content = record.content,
                    let range = CharSpan.resolve(chunk: hit.memory, in: content) {
-                    hit.source.charStart = range.lowerBound
-                    hit.source.charEnd = range.upperBound
+                    let matched = content.substring(charRange: range)
+                    if Self.spanConfidence(chunk: hit.memory, matchedText: matched) >= 0.6 {
+                        hit.source.charStart = range.lowerBound
+                        hit.source.charEnd = range.upperBound
+                    }
                 }
             }
             // Enrich with the engine's authoritative containing chunk (#1).

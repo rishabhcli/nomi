@@ -54,8 +54,10 @@ public enum ResponseTone: String, Equatable, Sendable, CaseIterable {
 /// Composes the per-answer formatting directive appended to the system prompt.
 public enum ResponseStyle {
     // A-151: grounding
-    public static func citationIntegritySupported(_ s: String, evidence: [Retrieved]) -> Bool { !Verification.stripCitations(s).isEmpty }
-    public static func unsupportedAnswerEvents() -> [QueryEvent] { [.state(.unsupportedAnswer)] }
+    public static func citationIntegritySupported(_ s: String, evidence: [Retrieved]) -> Bool {
+        GroundingCheck.citationIntegritySupported(s, evidence: evidence)
+    }
+    public static func unsupportedAnswerEvents() -> [QueryEvent] { GroundingCheck.unsupportedAnswerEvents() }
 
     // A-247: consolidation
     // MARK: - Dreaming safety (M8)
@@ -79,17 +81,6 @@ public enum ResponseStyle {
             }
         }
 
-    // A-143: grounding
-    // MARK: - Citation integrity (M5)
-        public static func citationIntegritySupported(_ sentence: String, evidence: [Retrieved]) -> Bool {
-            let claim = Verification.stripCitations(sentence).trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !claim.isEmpty else { return true }
-            let corpus = evidence.map { $0.memory.lowercased() }.joined(separator: " ")
-            let tokens = claim.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).filter { $0.count > 3 }
-            guard !tokens.isEmpty else { return true }
-            return tokens.allSatisfy { corpus.contains($0) }
-        }
-        public static func unsupportedAnswerEvents() -> [QueryEvent] { [.state(.unsupportedAnswer)] }
 
     public static func directive(shape: AnswerShape, tone: ResponseTone) -> String {
         let shapeText: String

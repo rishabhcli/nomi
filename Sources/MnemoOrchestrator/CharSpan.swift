@@ -63,8 +63,10 @@ public enum CharSpan {
     public static func resolve(chunk: String, in document: String) -> Range<Int>? {
         let docTokens = tokenize(document)
         let chunkWords = chunk.split(whereSeparator: \.isWhitespace)
-        guard !chunkWords.isEmpty, docTokens.count >= chunkWords.count else { return nil }
+        guard chunkWords.count >= 2, docTokens.count >= chunkWords.count else { return nil }
 
+        var best: Range<Int>?
+        var bestLen = 0
         for start in 0...(docTokens.count - chunkWords.count) {
             var matched = true
             for j in 0..<chunkWords.count where docTokens[start + j].text != chunkWords[j] {
@@ -72,10 +74,19 @@ public enum CharSpan {
                 break
             }
             if matched {
-                return docTokens[start].start..<docTokens[start + chunkWords.count - 1].end
+                let range = docTokens[start].start..<docTokens[start + chunkWords.count - 1].end
+                if chunkWords.count > bestLen {
+                    best = range
+                    bestLen = chunkWords.count
+                }
             }
         }
-        return nil
+        return best
+    }
+
+    /// Supersession-safe key: prefer latest doc version offsets when chunk text matches multiple spans.
+    public static func supersessionKey(docId: String, version: Int, range: Range<Int>) -> String {
+        "\(docId)|v\(version)|\(range.lowerBound)-\(range.upperBound)"
     }
 
     private static func tokenize(_ s: String) -> [Token] {

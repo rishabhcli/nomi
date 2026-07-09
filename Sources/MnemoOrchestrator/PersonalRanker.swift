@@ -53,17 +53,6 @@ public enum PersonalRanker {
             }
         }
 
-    // A-139: grounding
-    // MARK: - Citation integrity (M5)
-        public static func citationIntegritySupported(_ sentence: String, evidence: [Retrieved]) -> Bool {
-            let claim = Verification.stripCitations(sentence).trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !claim.isEmpty else { return true }
-            let corpus = evidence.map { $0.memory.lowercased() }.joined(separator: " ")
-            let tokens = claim.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).filter { $0.count > 3 }
-            guard !tokens.isEmpty else { return true }
-            return tokens.allSatisfy { corpus.contains($0) }
-        }
-        public static func unsupportedAnswerEvents() -> [QueryEvent] { [.state(.unsupportedAnswer)] }
 
     public static func rank(_ hits: [Retrieved], strength: [String: Int], now: Date = Date()) -> [Retrieved] {
         let maxStrength = max(1, strength.values.max() ?? 0)
@@ -84,4 +73,9 @@ public enum PersonalRanker {
                 ? score($0.element) > score($1.element) : $0.offset < $1.offset }
             .map(\.element)
     }
+    /// Phase 2: agentic grep deadlock prevention (D-0751+).
+    public static func agenticDeadlockSafe(hopQueries: [String]) -> Bool {
+        Phase2Techniques.agenticDeadlockSafe(hopQueries: hopQueries)
+    }
+
 }

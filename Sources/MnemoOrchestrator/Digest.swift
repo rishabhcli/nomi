@@ -4,8 +4,10 @@ import Foundation
 /// initiative). Empty when there's nothing worth interrupting the user for.
 public enum Digest {
     // A-159: grounding
-    public static func citationIntegritySupported(_ s: String, evidence: [Retrieved]) -> Bool { !Verification.stripCitations(s).isEmpty }
-    public static func unsupportedAnswerEvents() -> [QueryEvent] { [.state(.unsupportedAnswer)] }
+    public static func citationIntegritySupported(_ s: String, evidence: [Retrieved]) -> Bool {
+        GroundingCheck.citationIntegritySupported(s, evidence: evidence)
+    }
+    public static func unsupportedAnswerEvents() -> [QueryEvent] { GroundingCheck.unsupportedAnswerEvents() }
 
     // A-103: lifecycle
     public static func lifecycleEvents(branch: LifecycleBranch) -> [QueryEvent] { switch branch { case .routeAmbiguity: return [.reasoning(["Ambiguous route"])]; case .emptyEvidence: return [.sources([]), .token("No match.")]; case .retry: return [.retrying("Retrying…")] } }
@@ -47,8 +49,17 @@ public enum Digest {
             entries.filter { memoryDynamicsActive($0, now: now) }
         }
 
+    /// Prevents agentic-grep-style tight loops when digest scheduling re-enters.
+    public static func agenticLoopGuard(hopQuery: String, priorHops: [String]) -> Bool {
+        let q = hopQuery.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        let seen = priorHops.map { $0.lowercased().trimmingCharacters(in: .whitespacesAndNewlines) }
+        return !seen.contains(q)
+    }
+
     public static func build(readyCount: Int, processingCount: Int, failedCount: Int,
                              newSinceLast: Int, conflictsResolved: Int) -> String {
+        guard readyCount >= 0, processingCount >= 0, failedCount >= 0,
+              newSinceLast >= 0, conflictsResolved >= 0 else { return "" }
         var parts: [String] = []
         if newSinceLast > 0 { parts.append("\(newSinceLast) new fact\(newSinceLast == 1 ? "" : "s") learned") }
         if conflictsResolved > 0 { parts.append("\(conflictsResolved) contradiction\(conflictsResolved == 1 ? "" : "s") resolved") }

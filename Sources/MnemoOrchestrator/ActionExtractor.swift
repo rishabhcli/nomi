@@ -64,7 +64,9 @@ public enum ActionExtractor {
         emails.forEach { add(.email, $0) }
         let emailSet = Set(emails)
 
-        for url in matches(#"https?://[^\s)\]]+"#, in: text) { add(.url, url) }
+        for url in matches(#"https?://[^\s)\]]+"#, in: text) {
+            if actionHostIsLoopback(url) { add(.url, url) }
+        }
 
         if let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.phoneNumber.rawValue | NSTextCheckingResult.CheckingType.date.rawValue) {
             let ns = text as NSString
@@ -84,5 +86,11 @@ public enum ActionExtractor {
         guard let re = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else { return [] }
         let ns = text as NSString
         return re.matches(in: text, range: NSRange(location: 0, length: ns.length)).map { ns.substring(with: $0.range) }
+    }
+
+    /// Only surface loopback URLs — external links are not actionable offline.
+    public static func actionHostIsLoopback(_ urlString: String) -> Bool {
+        guard let host = URL(string: urlString)?.host else { return false }
+        return EgressGuard.isLoopbackHost(host)
     }
 }

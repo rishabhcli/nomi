@@ -114,6 +114,25 @@ public enum ContainerCatalog {
             entries.filter { memoryDynamicsActive($0, now: now) }
         }
 
+    /// Adversarial token-budget trim: rank by similarity, cap per-chunk size, resist padding attacks.
+    public static func trimEvidenceAdversarial(_ hits: [Retrieved], tokenBudget: Int) -> [Retrieved] {
+        let maxChunkChars = 500
+        let ranked = hits.sorted { $0.similarity > $1.similarity }
+        var kept: [Retrieved] = []
+        var used = 0
+        for var hit in ranked {
+            if hit.memory.count > maxChunkChars {
+                hit = Retrieved(memory: String(hit.memory.prefix(maxChunkChars)) + "…",
+                                similarity: hit.similarity, source: hit.source, context: hit.context)
+            }
+            let cost = TokenEstimate.of(hit.memory)
+            if used + cost > tokenBudget { continue }
+            kept.append(hit)
+            used += cost
+        }
+        return kept
+    }
+
     public static func distinct(_ docs: [DocumentMeta]) -> [String] {
         var seen = Set<String>()
         var out: [String] = []
@@ -167,7 +186,9 @@ extension EngineClient: ChunkProviding, DocumentSearching, ConversationIngesting
         let (data, resp) = try await session.data(for: try jsonBody(baseURL.appending(path: "/v3/search"), method: "POST", body))
         try ok(resp)
         return try JSONDecoder().decode(Wire.self, from: data).results.compactMap { r in
-            let chunk = r.chunks?.first { $0.isRelevant == true } ?? r.chunks?.first
+            let chunk = r.chunks?.max(by: { ($0.score ?? 0) < ($1.score ?? 0) })
+                ?? r.chunks?.first { $0.isRelevant == true }
+                ?? r.chunks?.first
             guard let text = chunk?.content else { return nil }
             return Retrieved(memory: text, similarity: chunk?.score ?? r.score ?? 0,
                              source: SourceLocator(docId: r.documentId ?? "", path: "",
@@ -218,7 +239,9 @@ extension EngineClient: ChunkProviding, DocumentSearching, ConversationIngesting
         struct Wire: Decodable { let url: String? }
         let (data, resp) = try await session.data(for: authorized(baseURL.appending(path: "/v3/documents/\(docId)/file-url")))
         guard (resp as? HTTPURLResponse)?.statusCode == 200 else { return nil }
-        return (try? JSONDecoder().decode(Wire.self, from: data))?.url
+        guard let url = (try? JSONDecoder().decode(Wire.self, from: data))?.url,
+              let host = URL(string: url)?.host, EgressGuard.isLoopbackHost(host) else { return nil }
+        return url
     }
 
     // #6 — per-container context prompt (shapes what becomes memory)
@@ -256,4 +279,9 @@ extension EngineClient: ChunkProviding, DocumentSearching, ConversationIngesting
         struct Wire: Decodable { let id: String }
         return (try? JSONDecoder().decode(Wire.self, from: respData).id) ?? ""
     }
+    /// Phase 2: agentic grep deadlock prevention (D-0751+).
+    public static func agenticDeadlockSafe(hopQueries: [String]) -> Bool {
+        Phase2Techniques.agenticDeadlockSafe(hopQueries: hopQueries)
+    }
+
 }

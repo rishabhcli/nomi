@@ -22,8 +22,10 @@ public enum KeywordBackstop {
     public static func ingestionSelfHealSafe(orphanIds: [String]) -> [String] { orphanIds.filter { !$0.isEmpty } }
 
     // A-123: grounding
-    public static func citationIntegritySupported(_ s: String, evidence: [Retrieved]) -> Bool { !Verification.stripCitations(s).isEmpty }
-    public static func unsupportedAnswerEvents() -> [QueryEvent] { [.state(.unsupportedAnswer)] }
+    public static func citationIntegritySupported(_ s: String, evidence: [Retrieved]) -> Bool {
+        GroundingCheck.citationIntegritySupported(s, evidence: evidence)
+    }
+    public static func unsupportedAnswerEvents() -> [QueryEvent] { GroundingCheck.unsupportedAnswerEvents() }
 
     // A-323: latency
     // MARK: - Scheduling (M11)
@@ -87,6 +89,9 @@ public enum KeywordBackstop {
         "says", "said", "tell", "show", "list", "give", "get", "any", "some",
     ]
 
+    static let maxFilesScanned = 24
+    static let maxRescueTerms = 6
+
     /// Content-bearing query terms worth a literal search (≥3 chars, not a
     /// stopword). Lowercased.
     public static func salientTerms(_ query: String) -> [String] {
@@ -134,7 +139,9 @@ public enum KeywordBackstop {
         let textExts: Set<String> = ["md", "txt", "csv", "json", "toml", "yaml", "yml", "rtf", "html"]
 
         var files: [(name: String, content: String, lower: String)] = []
+        var scanned = 0
         for name in names.sorted() {
+            guard scanned < maxFilesScanned else { break }
             let ext = (name as NSString).pathExtension.lowercased()
             guard textExts.contains(ext), !name.hasSuffix(".smfs-error.txt") else { continue }
             let path = root + "/" + name
@@ -142,6 +149,7 @@ public enum KeywordBackstop {
                   (attrs[.size] as? Int ?? 0) < 2_000_000,
                   let content = try? String(contentsOfFile: path, encoding: .utf8) else { continue }
             files.append((name, content, content.lowercased()))
+            scanned += 1
         }
 
         // Rarity: a stem found in few files is a strong signal ("prune"),
@@ -247,7 +255,7 @@ public enum KeywordBackstop {
             .contains { name in stems.filter { name.lowercased().contains($0) }.count >= 2 }
         guard !missing.isEmpty || numeric || titleMatch else { return (evidence, nil) }
 
-        let searchTerms = (numeric || titleMatch) ? terms : missing
+        let searchTerms = Array(((numeric || titleMatch) ? terms : missing).prefix(maxRescueTerms))
         let hits = best(terms: searchTerms, root: mountRoot, wantDigits: numeric, maxMatches: 3)
         var merged = evidence
         let existing = Set(evidence.map { $0.memory.prefix(120) })

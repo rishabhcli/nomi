@@ -58,10 +58,6 @@ public protocol HopPlanning: Sendable {
 /// The iterative semantic-grep-and-read loop over the mount. Bounded by
 /// maxHops (config `agentic.max_hops`); every hop logs its rationale.
 public struct AgenticGrep: Sendable {
-    // A-178: ingestion
-    public static func indexingTerminalState(path: String) -> TerminalState { .indexing(path: path) }
-    public static func ingestionSelfHealSafe(orphanIds: [String]) -> [String] { orphanIds.filter { !$0.isEmpty } }
-
     // A-322: latency
     // MARK: - Scheduling (M11)
         /// Interactive queries preempt utility background work at chunk boundaries.
@@ -144,15 +140,23 @@ public struct AgenticGrep: Sendable {
         // Hop 1 is always a semantic grep of the question itself.
         var decision = HopDecision.semantic(question, rationale: "initial semantic grep of the question")
         while hops.count < maxHops {
+            if Task.isCancelled { return AgenticResult(evidence: evidence, hops: hops) }
+            await Task.yield()
             switch decision {
             case .stop:
                 return AgenticResult(evidence: evidence, hops: hops)
             case .semantic(let q, let why):
+                if Self.isRepeatedHop(q, hops: hops) {
+                    return AgenticResult(evidence: evidence, hops: hops)
+                }
                 let hits = try await surface.semantic(q, scope: scope)
                 hops.append(HopTrace(hop: hops.count + 1, kind: "semantic", query: q,
                                      paths: hits.map(\.path), rationale: why))
                 collect(hits)
             case .literal(let term, let why):
+                if Self.isRepeatedHop(term, hops: hops) {
+                    return AgenticResult(evidence: evidence, hops: hops)
+                }
                 let hits = try await surface.literal(term, scope: scope)
                 hops.append(HopTrace(hop: hops.count + 1, kind: "literal", query: term,
                                      paths: hits.map(\.path), rationale: why))
@@ -161,6 +165,12 @@ public struct AgenticGrep: Sendable {
             decision = await planner.nextHop(question: question, evidence: evidence, hops: hops)
         }
         return AgenticResult(evidence: evidence, hops: hops)
+    }
+
+    /// Prevent ingest-gate deadlock: identical hop queries stop the loop.
+    static func isRepeatedHop(_ query: String, hops: [HopTrace]) -> Bool {
+        let q = query.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        return hops.contains { $0.query.lowercased().trimmingCharacters(in: .whitespacesAndNewlines) == q }
     }
 }
 
@@ -255,15 +265,19 @@ public enum Subprocess {
         p.executableURL = URL(fileURLWithPath: path)
         p.arguments = args
         let pipe = Pipe()
+        let errPipe = Pipe()
         p.standardOutput = pipe
-        // Discard stderr rather than pipe it: nothing reads a stderr Pipe here,
-        // so a child that writes >~64KB to stderr (e.g. `grep -rFn` emitting a
-        // permission-denied line per unreadable file over the mount) would block
-        // on the full pipe while we block on readDataToEndOfFile(stdout) → hang.
-        p.standardError = FileHandle.nullDevice
+        p.standardError = errPipe
         try p.run()
+        let errDrain = Task.detached { _ = errPipe.fileHandleForReading.readDataToEndOfFile() }
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         p.waitUntilExit()
+        errDrain.cancel()
         return String(data: data, encoding: .utf8) ?? ""
     }
+    /// Phase 2: agentic grep deadlock prevention (D-0751+).
+    public static func agenticDeadlockSafe(hopQueries: [String]) -> Bool {
+        Phase2Techniques.agenticDeadlockSafe(hopQueries: hopQueries)
+    }
+
 }

@@ -48,17 +48,6 @@ public enum ProfileDedupe {
             }
         }
 
-    // A-129: grounding
-    // MARK: - Citation integrity (M5)
-        public static func citationIntegritySupported(_ sentence: String, evidence: [Retrieved]) -> Bool {
-            let claim = Verification.stripCitations(sentence).trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !claim.isEmpty else { return true }
-            let corpus = evidence.map { $0.memory.lowercased() }.joined(separator: " ")
-            let tokens = claim.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).filter { $0.count > 3 }
-            guard !tokens.isEmpty else { return true }
-            return tokens.allSatisfy { corpus.contains($0) }
-        }
-        public static func unsupportedAnswerEvents() -> [QueryEvent] { [.state(.unsupportedAnswer)] }
 
     // A-233: memory
     // MARK: - Memory dynamics (M6)
@@ -80,6 +69,9 @@ public enum ProfileDedupe {
             .filter { !$0.isEmpty }
             .joined(separator: " ")
     }
+
+    /// Exposed for preamble staleness checks (ContextAssembler).
+    public static func normalizedFact(_ s: String) -> String { normalize(s) }
 
     public static func dedupe(_ p: Profile) -> Profile {
         var seen = Set<String>()

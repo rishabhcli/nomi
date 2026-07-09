@@ -3,3 +3,5 @@
 *.xcodeproj
 *.xcworkspace
 DerivedData/
+.swift/
+.swift62/

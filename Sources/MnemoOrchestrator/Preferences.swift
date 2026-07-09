@@ -19,8 +19,10 @@ public enum Preferences {
         }
 
     // A-160: grounding
-    public static func citationIntegritySupported(_ s: String, evidence: [Retrieved]) -> Bool { !Verification.stripCitations(s).isEmpty }
-    public static func unsupportedAnswerEvents() -> [QueryEvent] { [.state(.unsupportedAnswer)] }
+    public static func citationIntegritySupported(_ s: String, evidence: [Retrieved]) -> Bool {
+        GroundingCheck.citationIntegritySupported(s, evidence: evidence)
+    }
+    public static func unsupportedAnswerEvents() -> [QueryEvent] { GroundingCheck.unsupportedAnswerEvents() }
 
     // A-308: intelligence
     // MARK: - Expressiveness (beats-Siri offline)

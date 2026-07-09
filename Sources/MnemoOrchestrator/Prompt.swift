@@ -4,8 +4,10 @@
 
 public enum Prompt {
     // A-126: grounding
-    public static func citationIntegritySupported(_ s: String, evidence: [Retrieved]) -> Bool { !Verification.stripCitations(s).isEmpty }
-    public static func unsupportedAnswerEvents() -> [QueryEvent] { [.state(.unsupportedAnswer)] }
+    public static func citationIntegritySupported(_ s: String, evidence: [Retrieved]) -> Bool {
+        GroundingCheck.citationIntegritySupported(s, evidence: evidence)
+    }
+    public static func unsupportedAnswerEvents() -> [QueryEvent] { GroundingCheck.unsupportedAnswerEvents() }
 
     // A-326: latency
     // MARK: - Scheduling (M11)
@@ -95,7 +97,21 @@ public enum Prompt {
             } else {
                 span = ""
             }
-            return "[source: \(h.source.title) — \(h.source.path)\(span)]\n\(h.memory)"
+            let idTag = h.source.docId.isEmpty ? "" : " id:\(h.source.docId)"
+            return "[source: \(h.source.title) — \(h.source.path)\(idTag)\(span)]\n\(h.memory)"
         }.joined(separator: "\n\n")
+    }
+
+    /// Collision-resistant answer cache key — includes evidence fingerprint.
+    public static func answerCacheKey(query: String, container: String, corpusVersion: Int,
+                                      evidence: [Retrieved]) -> String {
+        let q = query.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        let fp = evidence.map { "\($0.source.docId):\($0.memory.prefix(48))" }.sorted().joined(separator: "|")
+        var h: UInt64 = UInt64(bitPattern: Int64(corpusVersion))
+        for byte in (container + "|" + q + "|" + fp).utf8 {
+            h ^= UInt64(byte)
+            h &*= 0x9E37_79B9_7F4A_7C15
+        }
+        return String(format: "%016llx", h)
     }
 }

@@ -11,17 +11,6 @@ public struct IngestGate {
             priority < .interactive
         }
 
-    // A-121: grounding
-    // MARK: - Citation integrity (M5)
-        public static func citationIntegritySupported(_ sentence: String, evidence: [Retrieved]) -> Bool {
-            let claim = Verification.stripCitations(sentence).trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !claim.isEmpty else { return true }
-            let corpus = evidence.map { $0.memory.lowercased() }.joined(separator: " ")
-            let tokens = claim.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).filter { $0.count > 3 }
-            guard !tokens.isEmpty else { return true }
-            return tokens.allSatisfy { corpus.contains($0) }
-        }
-        public static func unsupportedAnswerEvents() -> [QueryEvent] { [.state(.unsupportedAnswer)] }
 
     // A-277: consolidation
     // MARK: - Dreaming safety (M8)
@@ -59,9 +48,26 @@ public struct IngestGate {
     public func waitUntilSearchable(probe query: String, timeout: Duration) async -> Bool {
         let deadline = ContinuousClock.now.advanced(by: timeout)
         while ContinuousClock.now < deadline {
+            if Task.isCancelled { return false }
             if let hits = try? await retriever.search(SearchRequest(q: query)), !hits.isEmpty { return true }
-            try? await Task.sleep(for: .milliseconds(200))
+            do {
+                try await Task.sleep(for: .milliseconds(200))
+            } catch {
+                return false
+            }
         }
         return false
+    }
+
+    /// AsyncStream that completes when searchable or times out; respects cancellation.
+    public func searchableStream(probe query: String, timeout: Duration) -> AsyncStream<Bool> {
+        AsyncStream { continuation in
+            let task = Task {
+                let ok = await waitUntilSearchable(probe: query, timeout: timeout)
+                continuation.yield(ok)
+                continuation.finish()
+            }
+            continuation.onTermination = { @Sendable _ in task.cancel() }
+        }
     }
 }
