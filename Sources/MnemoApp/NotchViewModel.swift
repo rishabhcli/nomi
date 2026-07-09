@@ -59,10 +59,7 @@ final class NotchViewModel: ObservableObject {
     // MARK: - Session lifecycle
 
     func summon() {
-        // Single chokepoint for every summon path (hover, hotkey, tap): never
-        // open a fresh session while a query is still streaming, else a stray
-        // summon spawns a duplicate over the in-flight answer.
-        guard !isQuerying else { return }
+        guard !SurfaceUX.QueryLock.blocksResummon(isQuerying: isQuerying, phase: state.phase) else { return }
         state = NotchState(phase: .input, query: "", answer: "", sources: [])
         refreshPrivacy()
         // Proactive digest (beats-Siri #5): surface what changed, quietly, as
@@ -89,7 +86,7 @@ final class NotchViewModel: ObservableObject {
         // A query is already in flight — drop repeat submits so a second message
         // can't be fired while the first is still working (the surface stays in
         // its working/searching state until the answer arrives).
-        guard state.phase != .searching else { return }
+        guard !SurfaceUX.QueryLock.blocksRepeatSubmit(phase: state.phase) else { return }
         switch CommandParser.parse(raw) {
         case .command(let command): await handle(command)
         case .query(let q):
@@ -196,6 +193,7 @@ final class NotchViewModel: ObservableObject {
 
     /// Recovery-button actions actually do something (not no-ops).
     func recover(_ recovery: TerminalState.Recovery) async {
+        showInfo(SurfaceUX.ErrorRecovery.recoveryStatusMessage(recovery))
         switch recovery {
         case .broaden, .waitAndRetry:
             if !lastQuery.isEmpty { await runQuery(lastQuery) }
@@ -203,10 +201,9 @@ final class NotchViewModel: ObservableObject {
             commands?.openMemoryFolder()
         case .restartEngine, .loadModel:
             let previous = lastQuery
-            showInfo(recovery == .restartEngine ? "Restarting the engine…" : "Loading the model…")
             let result = await commands?.recover(recovery)
             if let result { showInfo(result) }
-            if !previous.isEmpty { await runQuery(previous) }   // auto-retry after recovery
+            if !previous.isEmpty { await runQuery(previous) }
         }
     }
 

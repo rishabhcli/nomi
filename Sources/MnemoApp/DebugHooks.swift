@@ -29,7 +29,7 @@ final class DebugHooks {
             ("ai.mnemo.debug.demo", { [weak self] in self?.showDemoAnswer() }),
             ("ai.mnemo.debug.snapshot", { [weak self] in self?.snapshot() }),
             ("ai.mnemo.debug.orb", { [weak self] in self?.renderOrbStills() }),
-            ("ai.mnemo.debug.cycle", { [weak self] in self?.cycleOpenClose() }),
+            ("ai.mnemo.debug.latency", { [weak self] in self?.logLatencyMetrics() }),
             ("ai.mnemo.debug.dictate", { [weak self] in self?.startDictation() }),
             ("ai.mnemo.debug.stopdictate", { [weak self] in self?.controller.dictation.stop() }),
             ("ai.mnemo.debug.fakelisten", { [weak self] in self?.fakeListen() }),
@@ -89,6 +89,20 @@ final class DebugHooks {
         controller.vm.state.query = q
         Task { await controller.vm.submit() }
         try? "ask-started query=\(q)\n".appendToFile(atPath: "/tmp/mnemo-geometry.log")
+    }
+
+    /// Perceived-latency evidence (E-0001): logs spring tokens and phase timing.
+    private func logLatencyMetrics() {
+        let phase = controller.vm.state.phase
+        let log = """
+        latency-metrics phase=\(phase) \
+        summonResponse=\(SurfaceUX.PerceivedLatency.summonResponse) \
+        dictationHold=\(SurfaceUX.PerceivedLatency.dictationHoldSeconds) \
+        predictiveWidth=\(SurfaceUX.PerceivedLatency.predictiveExpandedWidth(phase: phase, listening: controller.dictation.isListening))
+        """
+        try? log.appendToFile(atPath: "/tmp/mnemo-geometry.log")
+        controller.summon()
+        try? "latency-summon-fired\n".appendToFile(atPath: "/tmp/mnemo-geometry.log")
     }
 
     /// 10× open/close smoothness soak (UI.md §11): drives summon/dismiss

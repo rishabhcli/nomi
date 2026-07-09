@@ -17,6 +17,9 @@ struct InputTray: View {
     let reduceMotion: Bool
     let showHandle: Bool
     var glassNamespace: Namespace.ID
+    @Environment(\.colorSchemeContrast) private var colorContrast
+
+    private var highContrast: Bool { colorContrast == .increased }
 
     private var hasText: Bool { !vm.state.query.isEmpty }
 
@@ -28,7 +31,8 @@ struct InputTray: View {
                 // rounds its bottom corners. (Glass cannot sample glass: nothing
                 // else on the surface uses glassEffect.)
                 Rectangle().fill(.clear)
-                    .glassEffect(.regular.tint(.black.opacity(Surface.trayTint)), in: Rectangle())
+                    .glassEffect(.regular.tint(.black.opacity(SurfaceUX.GlassHierarchy.trayTint(highContrast: highContrast))),
+                                 in: Rectangle())
                     .glassEffectID("input-tray", in: glassNamespace)
                 VStack(spacing: 0) {
                     // The black body melts INTO the glass here — a black→clear
@@ -56,7 +60,7 @@ struct InputTray: View {
     /// shows ONLY the spinner — no step/status text (kept out of the notch).
     private var pill: some View {
         ZStack {
-            Capsule().fill(.white.opacity(0.10))
+            Capsule().fill(.white.opacity(SurfaceUX.GlassHierarchy.pillFill(highContrast: highContrast)))
             if searching {
                 SixDotSpinner()
                     .frame(width: Surface.spinnerRing + 6, height: Surface.spinnerRing + 6)
@@ -64,18 +68,16 @@ struct InputTray: View {
                 TextField("Ask Mnemo", text: $vm.state.query)
                     .textFieldStyle(.plain)
                     .font(.system(size: 15))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.white.opacity(SurfaceUX.IncreaseContrast.textOpacity(primary: true, highContrast: highContrast)))
                     .tint(.white)
                     .focused($focused)
                     .onSubmit { Task { await vm.submit() } }
                     .onKeyPress(.upArrow) { vm.recallPrevious(); return .handled }
                     .onKeyPress(.downArrow) { vm.recallNext(); return .handled }
-                    // transcript→query bridge lives on the always-mounted surface
-                    // (NotchSurfaceView) — it must survive the tray unmounting
-                    // while the listening drop is up.
                     .padding(.horizontal, 16)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .onAppear { focused = true }
+                    .accessibilitySortPriority(Double(SurfaceUX.voiceOverSortPriority(for: .queryField)))
             }
         }
         .frame(height: 40)
@@ -105,8 +107,9 @@ struct InputTray: View {
         }
         .buttonStyle(.plain)
         .animation(Motion.adaptive(Motion.glyph, reduceMotion: reduceMotion), value: hasText)
-        .help(hasText ? "Send (⌘⏎)" : "Dictate")
+        .help(hasText ? "Send (\(SurfaceUX.Keyboard.submitShortcut))" : "Dictate")
         .accessibilityLabel(hasText ? "Send" : "Dictate")
+        .accessibilityHint(SurfaceUX.DictationDiscoverability.accessibilityHint)
     }
 }
 
@@ -129,6 +132,9 @@ struct AnswerZone: View {
     @ObservedObject var vm: NotchViewModel
     @ObservedObject var dictation: Dictation
     let reduceMotion: Bool
+    @Environment(\.colorSchemeContrast) private var colorContrast
+
+    private var highContrast: Bool { colorContrast == .increased }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -138,18 +144,20 @@ struct AnswerZone: View {
                                phase: vm.state.phase,
                                reduceMotion: reduceMotion)
             if !vm.state.suggestions.isEmpty && vm.state.phase == .answering {
-                SuggestionChips(suggestions: vm.state.suggestions, reduceMotion: reduceMotion)
+                SuggestionChips(suggestions: SurfaceUX.Suggestions.filtered(vm.state.suggestions),
+                                reduceMotion: reduceMotion, highContrast: highContrast)
             }
             if !vm.state.entities.isEmpty && vm.state.phase == .answering {
-                EntityChips(entities: vm.state.entities)
+                EntityChips(entities: SurfaceUX.EntityChips.truncated(vm.state.entities),
+                            highContrast: highContrast)
             }
             // A dictation problem belongs to the input/dictation moment only —
             // never stacked above an answer or terminal state, where it would
             // read as a stale banner leaking into an unrelated result.
             if let problem = dictation.problem, vm.state.answer.isEmpty, vm.state.terminal == nil {
                 Text(problem)
-                    .font(.system(size: 13))
-                    .foregroundStyle(.white.opacity(0.65))
+                    .font(.system(size: SurfaceUX.Typography.statusPointSize))
+                    .foregroundStyle(.white.opacity(SurfaceUX.IncreaseContrast.textOpacity(primary: false, highContrast: highContrast)))
             }
             if let terminal = vm.state.terminal {
                 terminalView(terminal)
@@ -171,13 +179,17 @@ struct AnswerZone: View {
         return VStack(alignment: .leading, spacing: 4) {
             ForEach(Array(sentences.enumerated()), id: \.offset) { i, s in
                 Text(markdown(s))
-                    .font(.system(size: Surface.answerFont))
-                    .lineSpacing(5)
-                    .foregroundStyle(vm.state.unsupportedSentences.contains(i)
-                                     ? AnyShapeStyle(.orange.opacity(0.9))
-                                     : AnyShapeStyle(.white))
-                    .underline(vm.state.unsupportedSentences.contains(i))
+                    .font(.system(size: SurfaceUX.Typography.answerPointSize))
+                    .lineSpacing(SurfaceUX.Typography.answerLineSpacing)
+                    .foregroundStyle(SurfaceUX.UnsupportedStyling.isUnsupported(sentenceIndex: i,
+                                                                              unsupported: vm.state.unsupportedSentences)
+                                     ? AnyShapeStyle(.orange.opacity(SurfaceUX.UnsupportedStyling.warningOpacity))
+                                     : AnyShapeStyle(.white.opacity(SurfaceUX.IncreaseContrast.textOpacity(primary: true, highContrast: highContrast))))
+                    .underline(SurfaceUX.UnsupportedStyling.isUnsupported(sentenceIndex: i,
+                                                                          unsupported: vm.state.unsupportedSentences)
+                               && SurfaceUX.UnsupportedStyling.usesUnderline)
                     .textSelection(.enabled)
+                    .accessibilitySortPriority(Double(SurfaceUX.voiceOverSortPriority(for: .answer)))
             }
         }
         .fixedSize(horizontal: false, vertical: true)
@@ -187,17 +199,29 @@ struct AnswerZone: View {
     @ViewBuilder private var sourceChips: some View {
         if !vm.state.sources.isEmpty {
             HStack(spacing: 6) {
-                ForEach(vm.state.sources.prefix(3), id: \.docId) { card in
+                ForEach(Array(vm.state.sources.prefix(SurfaceUX.CitationAffordance.maxVisibleSources).enumerated()),
+                        id: \.element.docId) { index, card in
                     Button { reveal(card.path) } label: {
-                        Text(card.title)
-                            .font(.system(size: 12))
-                            .foregroundStyle(.white.opacity(0.7))
-                            .lineLimit(1)
-                            .padding(.horizontal, 12).padding(.vertical, 6)
-                            .background(Capsule().fill(.white.opacity(0.12)))
+                        HStack(spacing: 4) {
+                            if SurfaceUX.CitationAffordance.stepShowsCitationMarker(card.title) || index == 0 {
+                                Text("[\(index + 1)]")
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(.white.opacity(0.5))
+                            }
+                            Text(card.title)
+                                .font(.system(size: SurfaceUX.Typography.chipPointSize))
+                                .foregroundStyle(.white.opacity(SurfaceUX.IncreaseContrast.textOpacity(primary: false, highContrast: highContrast)))
+                                .lineLimit(1)
+                        }
+                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .frame(minWidth: SurfaceUX.CitationAffordance.chipMinTapWidth)
+                        .background(Capsule().fill(.white.opacity(SurfaceUX.GlassHierarchy.chipFill(highContrast: highContrast))))
                     }
                     .buttonStyle(.plain)
                     .help(card.path)
+                    .accessibilityLabel(SurfaceUX.CitationAffordance.sourceChipAccessibility(
+                        title: card.title, path: card.path, index: index))
+                    .accessibilitySortPriority(Double(SurfaceUX.voiceOverSortPriority(for: .sources)))
                 }
             }
         }
@@ -214,11 +238,11 @@ struct AnswerZone: View {
             VStack(alignment: .leading, spacing: 10) {
                 Text(TerminalPresentation.title(for: t))
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.9))
+                    .foregroundStyle(.white.opacity(SurfaceUX.IncreaseContrast.textOpacity(primary: true, highContrast: highContrast)))
                 Text(NotchReducer.message(for: t))
-                    .font(.system(size: Surface.answerFont))
-                    .lineSpacing(5)
-                    .foregroundStyle(.white)
+                    .font(.system(size: SurfaceUX.Typography.answerPointSize))
+                    .lineSpacing(SurfaceUX.Typography.answerLineSpacing)
+                    .foregroundStyle(.white.opacity(SurfaceUX.IncreaseContrast.textOpacity(primary: true, highContrast: highContrast)))
                 if case .empty(let nearest) = t, !nearest.isEmpty {
                     NearestMatchesRow(cards: nearest)
                 }
@@ -228,17 +252,16 @@ struct AnswerZone: View {
     }
 
     @ViewBuilder private func recoveryButtons(for t: TerminalState) -> some View {
-        switch t.recovery {
-        case .broaden:
-            Button("Broaden search") { Task { await vm.recover(.broaden) } }.buttonStyle(.glass)
-        case .restartEngine:
-            Button("Restart engine") { Task { await vm.recover(.restartEngine) } }.buttonStyle(.glassProminent)
-        case .loadModel:
-            Button("Load model") { Task { await vm.recover(.loadModel) } }.buttonStyle(.glassProminent)
-        case .waitAndRetry:
-            Button("Try again") { Task { await vm.recover(.waitAndRetry) } }.buttonStyle(.glass)
-        case .addFiles:
-            Button("Open memory folder") { Task { await vm.recover(.addFiles) } }.buttonStyle(.glassProminent)
+        let recovery = t.recovery
+        let title = SurfaceUX.ErrorRecovery.recoveryButtonTitle(recovery)
+        if SurfaceUX.ErrorRecovery.recoveryIsPrimary(recovery) {
+            Button(title) { Task { await vm.recover(recovery) } }
+                .buttonStyle(.glassProminent)
+                .accessibilitySortPriority(Double(SurfaceUX.voiceOverSortPriority(for: .recovery)))
+        } else {
+            Button(title) { Task { await vm.recover(recovery) } }
+                .buttonStyle(.glass)
+                .accessibilitySortPriority(Double(SurfaceUX.voiceOverSortPriority(for: .recovery)))
         }
     }
 
@@ -259,16 +282,17 @@ struct AnswerZone: View {
 struct SuggestionChips: View {
     let suggestions: [String]
     let reduceMotion: Bool
+    var highContrast: Bool = false
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
-                ForEach(suggestions.prefix(4), id: \.self) { chip in
+                ForEach(suggestions, id: \.self) { chip in
                     Text(chip)
-                        .font(.system(size: 12))
-                        .foregroundStyle(.white.opacity(0.75))
+                        .font(.system(size: SurfaceUX.Typography.chipPointSize))
+                        .foregroundStyle(.white.opacity(SurfaceUX.IncreaseContrast.textOpacity(primary: false, highContrast: highContrast)))
                         .padding(.horizontal, 10).padding(.vertical, 5)
-                        .background(Capsule().fill(.white.opacity(0.10)))
+                        .background(Capsule().fill(.white.opacity(SurfaceUX.GlassHierarchy.chipFill(highContrast: highContrast))))
                 }
             }
         }
@@ -278,15 +302,18 @@ struct SuggestionChips: View {
 
 struct EntityChips: View {
     let entities: [String]
+    var highContrast: Bool = false
 
     var body: some View {
         HStack(spacing: 6) {
-            ForEach(entities.prefix(5), id: \.self) { name in
+            ForEach(entities, id: \.self) { name in
                 Text(name)
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.65))
+                    .foregroundStyle(.white.opacity(SurfaceUX.IncreaseContrast.textOpacity(primary: false, highContrast: highContrast)))
                     .padding(.horizontal, 8).padding(.vertical, 4)
-                    .background(Capsule().stroke(.white.opacity(0.2)))
+                    .frame(minHeight: SurfaceUX.EntityChips.minTapHeight)
+                    .background(Capsule().stroke(.white.opacity(highContrast ? 0.45 : 0.2)))
+                    .accessibilityLabel(SurfaceUX.EntityChips.explorationLabel(name))
             }
         }
         .accessibilityLabel("Entities mentioned")
