@@ -79,3 +79,4 @@
 {"n": 79, "id": "C-079", "title": "Structured log: emit total_ms", "phase": "structured-logging", "purpose": "Implement structured logging of `total_ms` to `~/Library/Logs/Mnemo/app.jsonl` (one JSON object per query, no document body at info level). Add redaction tests."}
 {"n": 80, "id": "C-080", "title": "Structured log: emit egress_blocked_count", "phase": "structured-logging", "purpose": "Implement structured logging of `egress_blocked_count` to `~/Library/Logs/Mnemo/app.jsonl` (one JSON object per query, no document body at info level). Add redaction tests."}
 {"n": 81, "id": "C-081", "title": "Config wire: [dreaming] enabled", "phase": "config-wiring", "purpose": "Wire `[dreaming]` section into MnemoConfig and Consolidator scheduling."}
+{"n": 82, "id": "C-082", "title": "Config wire: [dreaming] interval_hours", "phase": "config-wiring", "purpose": "Expose dream interval; validate > 0 at startup."}
