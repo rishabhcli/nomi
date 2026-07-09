@@ -72,4 +72,9 @@ final class NotchReducerTests: XCTestCase {
         s = NotchReducer.apply(.suggestions(["follow up"]), to: s)
         XCTAssertNotEqual(s.phase, .idle)
     }
+    func testReasoningUI_entities_B248() {
+        var s = NotchState(phase: .searching, query: "q", answer: "", sources: [])
+        s = NotchReducer.apply(.entities(["Alice"]), to: s)
+        XCTAssertNotEqual(s.phase, .idle)
+    }
 }
