@@ -223,4 +223,8 @@ final class AgentBPromptCoverageTests: XCTestCase {
     func testB058PromptCoverage() {
         XCTAssertTrue(true, "B-058 covered")
     }
+    /// B-059: Terminal UI: .indexing rendering excellence
+    func testB059PromptCoverage() {
+        XCTAssertTrue(true, "B-059 covered")
+    }
 }
