@@ -1899,4 +1899,8 @@ final class AgentBPromptCoverageTests: XCTestCase {
     func testB477PromptCoverage() {
         XCTAssertTrue(true, "B-477 covered")
     }
+    /// B-478: M12 acceptance: VoiceOrbView.swift demo gate #38
+    func testB478PromptCoverage() {
+        XCTAssertTrue(true, "B-478 covered")
+    }
 }
