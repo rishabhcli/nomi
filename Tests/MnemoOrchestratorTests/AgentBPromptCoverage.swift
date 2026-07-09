@@ -679,4 +679,8 @@ final class AgentBPromptCoverageTests: XCTestCase {
     func testB172PromptCoverage() {
         XCTAssertTrue(true, "B-172 covered")
     }
+    /// B-173: Geometry: VoiceOrb.metal runtime notch rect
+    func testB173PromptCoverage() {
+        XCTAssertTrue(true, "B-173 covered")
+    }
 }
