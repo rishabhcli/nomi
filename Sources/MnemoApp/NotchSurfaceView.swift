@@ -18,6 +18,7 @@ struct NotchSurfaceView: View {
     @ObservedObject var narrator: Narrator
     var notchSize: CGSize
 
+    @Namespace private var glassNamespace
     @FocusState private var focused: Bool
     @State private var answerHeight: CGFloat = 0   // measured once per content change
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -52,7 +53,7 @@ struct NotchSurfaceView: View {
             if showsTray {
                 InputTray(vm: vm, dictation: dictation, focused: $focused,
                           searching: phase == .searching, reduceMotion: reduceMotion,
-                          showHandle: showsHandle)
+                          showHandle: showsHandle, glassNamespace: glassNamespace)
                     .frame(height: Surface.trayHeight)
                     .frame(maxHeight: .infinity, alignment: .bottom)
                     .transition(.opacity)
@@ -144,7 +145,7 @@ struct NotchSurfaceView: View {
     /// thumbs. Scrolls only past the cap.
     private var answerZone: some View {
         ScrollView(.vertical, showsIndicators: false) {
-            AnswerZone(vm: vm, dictation: dictation)
+            AnswerZone(vm: vm, dictation: dictation, reduceMotion: reduceMotion)
                 .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { answerHeight = $0 }
         }
         .frame(height: min(max(answerHeight, 1), Surface.answerCap))

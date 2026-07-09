@@ -16,6 +16,8 @@ final class TerminalStateRenderTests: XCTestCase {
             let msg = NotchReducer.message(for: s)
             XCTAssertFalse(msg.trimmingCharacters(in: .whitespaces).isEmpty, "\(s) rendered empty")
         }
+        let corpus = NotchReducer.message(for: .emptyCorpus)
+        XCTAssertFalse(corpus.isEmpty)
     }
 
     func testRecoveryActionsAreDefinedWhereRelevant() {

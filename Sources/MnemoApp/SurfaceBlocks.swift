@@ -14,34 +14,38 @@ struct InputTray: View {
     let searching: Bool
     let reduceMotion: Bool
     let showHandle: Bool
+    var glassNamespace: Namespace.ID
 
     private var hasText: Bool { !vm.state.query.isEmpty }
 
     var body: some View {
-        ZStack(alignment: .top) {
-            // The tray is the ONLY glassy part of the surface: dark, translucent
-            // Liquid Glass — the desktop shows through it. The outer NotchShape
-            // rounds its bottom corners. (Glass cannot sample glass: nothing
-            // else on the surface uses glassEffect.)
-            Rectangle().fill(.clear)
-                .glassEffect(.regular.tint(.black.opacity(Surface.trayTint)), in: Rectangle())
-            VStack(spacing: 0) {
-                // The black body melts INTO the glass here — a black→clear
-                // gradient OVER the glass, so there is never a desktop-showing
-                // gap between the body and the controls.
-                LinearGradient(colors: [.black, .black.opacity(0)], startPoint: .top, endPoint: .bottom)
-                    .frame(height: Surface.bandFade)
-                    .allowsHitTesting(false)
-                HStack(spacing: 10) {
-                    pill
-                    // The send/mic control is hidden while working, so a second
-                    // query can't be fired mid-flight — the tray collapses to
-                    // just the spinner.
-                    if !searching { micOrSend }
+        GlassEffectContainer {
+            ZStack(alignment: .top) {
+                // The tray is the ONLY glassy part of the surface: dark, translucent
+                // Liquid Glass — the desktop shows through it. The outer NotchShape
+                // rounds its bottom corners. (Glass cannot sample glass: nothing
+                // else on the surface uses glassEffect.)
+                Rectangle().fill(.clear)
+                    .glassEffect(.regular.tint(.black.opacity(Surface.trayTint)), in: Rectangle())
+                    .glassEffectID("input-tray", in: glassNamespace)
+                VStack(spacing: 0) {
+                    // The black body melts INTO the glass here — a black→clear
+                    // gradient OVER the glass, so there is never a desktop-showing
+                    // gap between the body and the controls.
+                    LinearGradient(colors: [.black, .black.opacity(0)], startPoint: .top, endPoint: .bottom)
+                        .frame(height: Surface.bandFade)
+                        .allowsHitTesting(false)
+                    HStack(spacing: 10) {
+                        pill
+                        // The send/mic control is hidden while working, so a second
+                        // query can't be fired mid-flight — the tray collapses to
+                        // just the spinner.
+                        if !searching { micOrSend }
+                    }
+                    .padding(.horizontal, 13)
+                    .frame(height: Surface.bandHeight)
+                    if showHandle { HomeIndicator().frame(height: Surface.trayHandle) }
                 }
-                .padding(.horizontal, 13)
-                .frame(height: Surface.bandHeight)
-                if showHandle { HomeIndicator().frame(height: Surface.trayHandle) }
             }
         }
     }
@@ -122,9 +126,21 @@ struct HomeIndicator: View {
 struct AnswerZone: View {
     @ObservedObject var vm: NotchViewModel
     @ObservedObject var dictation: Dictation
+    let reduceMotion: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
+            ReasoningTraceView(steps: vm.state.reasoning,
+                               status: vm.state.status,
+                               understanding: vm.state.understanding,
+                               phase: vm.state.phase,
+                               reduceMotion: reduceMotion)
+            if !vm.state.suggestions.isEmpty && vm.state.phase == .answering {
+                SuggestionChips(suggestions: vm.state.suggestions, reduceMotion: reduceMotion)
+            }
+            if !vm.state.entities.isEmpty && vm.state.phase == .answering {
+                EntityChips(entities: vm.state.entities)
+            }
             // A dictation problem belongs to the input/dictation moment only —
             // never stacked above an answer or terminal state, where it would
             // read as a stale banner leaking into an unrelated result.
@@ -185,12 +201,31 @@ struct AnswerZone: View {
         }
     }
 
-    /// Terminal states stay minimal: the message plus one recovery action.
+    /// Terminal states: icon, title, message, recovery CTA (B-041…B-080).
     @ViewBuilder private func terminalView(_ t: TerminalState) -> some View {
-        Text(NotchReducer.message(for: t))
-            .font(.system(size: Surface.answerFont))
-            .lineSpacing(5)
-            .foregroundStyle(.white)
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: TerminalPresentation.icon(for: t))
+                .font(.system(size: 22))
+                .foregroundStyle(.white.opacity(0.85))
+                .frame(width: 28)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 10) {
+                Text(TerminalPresentation.title(for: t))
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.9))
+                Text(NotchReducer.message(for: t))
+                    .font(.system(size: Surface.answerFont))
+                    .lineSpacing(5)
+                    .foregroundStyle(.white)
+                if case .empty(let nearest) = t, !nearest.isEmpty {
+                    NearestMatchesRow(cards: nearest)
+                }
+                recoveryButtons(for: t)
+            }
+        }
+    }
+
+    @ViewBuilder private func recoveryButtons(for t: TerminalState) -> some View {
         switch t.recovery {
         case .broaden:
             Button("Broaden search") { Task { await vm.recover(.broaden) } }.buttonStyle(.glass)
@@ -214,6 +249,67 @@ struct AnswerZone: View {
     private func reveal(_ path: String) {
         NSWorkspace.shared.activateFileViewerSelecting(
             [URL(fileURLWithPath: (path as NSString).expandingTildeInPath)])
+    }
+}
+
+// MARK: - Supporting chips & rows
+
+struct SuggestionChips: View {
+    let suggestions: [String]
+    let reduceMotion: Bool
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(suggestions.prefix(4), id: \.self) { chip in
+                    Text(chip)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.white.opacity(0.75))
+                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .background(Capsule().fill(.white.opacity(0.10)))
+                }
+            }
+        }
+        .accessibilityLabel("Suggested follow-ups")
+    }
+}
+
+struct EntityChips: View {
+    let entities: [String]
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(entities.prefix(5), id: \.self) { name in
+                Text(name)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.65))
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(Capsule().stroke(.white.opacity(0.2)))
+            }
+        }
+        .accessibilityLabel("Entities mentioned")
+    }
+}
+
+struct NearestMatchesRow: View {
+    let cards: [SourceCard]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Nearest matches")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.white.opacity(0.55))
+            HStack(spacing: 6) {
+                ForEach(cards.prefix(3), id: \.docId) { card in
+                    Text(card.title)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.white.opacity(0.7))
+                        .lineLimit(1)
+                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .background(Capsule().fill(.white.opacity(0.08)))
+                }
+            }
+        }
     }
 }
 
