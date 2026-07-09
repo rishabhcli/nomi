@@ -17,8 +17,10 @@ public enum Provenance {
         }
         public enum LifecycleBranch: String, Sendable { case routeAmbiguity, emptyEvidence, retry }
     // A-154: grounding
-    public static func citationIntegritySupported(_ s: String, evidence: [Retrieved]) -> Bool { !Verification.stripCitations(s).isEmpty }
-    public static func unsupportedAnswerEvents() -> [QueryEvent] { [.state(.unsupportedAnswer)] }
+    public static func citationIntegritySupported(_ s: String, evidence: [Retrieved]) -> Bool {
+        GroundingCheck.citationIntegritySupported(s, evidence: evidence)
+    }
+    public static func unsupportedAnswerEvents() -> [QueryEvent] { GroundingCheck.unsupportedAnswerEvents() }
 
     // A-302: intelligence
     // MARK: - Expressiveness (beats-Siri offline)
@@ -44,8 +46,10 @@ public enum Provenance {
 
     public static func explain(_ verdicts: [SentenceVerdict]) -> String {
         guard !verdicts.isEmpty else { return "No answer to explain yet." }
+        let substantive = verdicts.filter { $0.text.count >= 3 }
+        guard !substantive.isEmpty else { return "No answer to explain yet." }
         var lines = ["Here's why I said that:"]
-        for v in verdicts where v.text.count >= 3 {
+        for v in substantive {
             if v.supported, let src = v.bestSource {
                 lines.append("• “\(v.text)” — from \(src.title)")
             } else {
@@ -61,16 +65,16 @@ public enum Provenance {
     public static func fromAnswer(_ answer: String, unsupported: Set<Int>,
                                   sources: [SourceCard]) -> [SentenceVerdict] {
         Sentences.split(answer).enumerated().map { idx, sentence in
+            let supported = !unsupported.contains(idx)
             var best: SourceLocator?
             if let range = sentence.range(of: #"\[(\d+)\]"#, options: .regularExpression),
                let n = Int(sentence[range].dropFirst().dropLast()), n >= 1, n <= sources.count {
                 let card = sources[n - 1]
                 best = SourceLocator(docId: card.docId, path: card.path, title: card.title)
-            } else if let first = sources.first {
+            } else if supported, let first = sources.first {
                 best = SourceLocator(docId: first.docId, path: first.path, title: first.title)
             }
-            return SentenceVerdict(index: idx, text: sentence,
-                                   supported: !unsupported.contains(idx), bestSource: best)
+            return SentenceVerdict(index: idx, text: sentence, supported: supported, bestSource: best)
         }
     }
 }

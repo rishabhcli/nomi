@@ -59,4 +59,12 @@ public enum CorpusSuggester {
     public static func fromTitles(_ titles: [String], max: Int = 3) -> [String] {
         fromCards(titles.map { SourceCard(title: $0, path: "", docId: $0) }, max: max)
     }
+
+    /// Renderable events when empty fallback surfaces nearest below-threshold matches.
+    public static func emptyEvidenceEvents(nearest cards: [SourceCard]) -> [QueryEvent] {
+        var events: [QueryEvent] = [.state(.empty(nearest: cards))]
+        let suggestions = fromCards(cards)
+        if !suggestions.isEmpty { events.append(.suggestions(suggestions)) }
+        return events
+    }
 }

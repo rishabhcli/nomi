@@ -53,17 +53,6 @@ public actor AnswerCache {
             }
         }
 
-    // A-137: grounding
-    // MARK: - Citation integrity (M5)
-        public static func citationIntegritySupported(_ sentence: String, evidence: [Retrieved]) -> Bool {
-            let claim = Verification.stripCitations(sentence).trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !claim.isEmpty else { return true }
-            let corpus = evidence.map { $0.memory.lowercased() }.joined(separator: " ")
-            let tokens = claim.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).filter { $0.count > 3 }
-            guard !tokens.isEmpty else { return true }
-            return tokens.allSatisfy { corpus.contains($0) }
-        }
-        public static func unsupportedAnswerEvents() -> [QueryEvent] { [.state(.unsupportedAnswer)] }
 
     public struct Entry: Sendable { public let answer: String; public let sources: [SourceCard] }
     private struct Stored { let answer: String; let sources: [SourceCard]; let version: Int; let at: TimeInterval }
@@ -73,22 +62,29 @@ public actor AnswerCache {
 
     public init(ttl: TimeInterval = 120) { self.ttl = ttl }
 
-    private func key(_ query: String, _ container: String) -> String {
-        "\(container)::\(query.lowercased().trimmingCharacters(in: .whitespacesAndNewlines))"
+    private func key(_ query: String, _ container: String, _ corpusVersion: Int) -> String {
+        "\(Phase2Techniques.cacheKey(query: query, container: container))::\(corpusVersion)"
     }
 
     public func store(query: String, container: String, corpusVersion: Int,
                       answer: String, sources: [SourceCard], at: TimeInterval = Date().timeIntervalSinceReferenceDate) {
-        entries[key(query, container)] = Stored(answer: answer, sources: sources, version: corpusVersion, at: at)
+        entries[key(query, container, corpusVersion)] = Stored(answer: answer, sources: sources, version: corpusVersion, at: at)
     }
 
     public func lookup(query: String, container: String, corpusVersion: Int,
                        at: TimeInterval = Date().timeIntervalSinceReferenceDate) -> Entry? {
-        guard let s = entries[key(query, container)] else { return nil }
+        let k = key(query, container, corpusVersion)
+        guard let s = entries[k] else { return nil }
         guard s.version == corpusVersion, at - s.at <= ttl else {
-            entries[key(query, container)] = nil   // stale → evict
+            entries[k] = nil   // stale → evict
             return nil
         }
         return Entry(answer: s.answer, sources: s.sources)
     }
+
+    /// Phase 2: agentic grep deadlock prevention (D-0751+).
+    public static func agenticDeadlockSafe(hopQueries: [String]) -> Bool {
+        Phase2Techniques.agenticDeadlockSafe(hopQueries: hopQueries)
+    }
+
 }

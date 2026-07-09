@@ -25,8 +25,10 @@ public enum TimeWindow {
         }
         public enum LifecycleBranch: String, Sendable { case routeAmbiguity, emptyEvidence, retry }
     // A-149: grounding
-    public static func citationIntegritySupported(_ s: String, evidence: [Retrieved]) -> Bool { !Verification.stripCitations(s).isEmpty }
-    public static func unsupportedAnswerEvents() -> [QueryEvent] { [.state(.unsupportedAnswer)] }
+    public static func citationIntegritySupported(_ s: String, evidence: [Retrieved]) -> Bool {
+        GroundingCheck.citationIntegritySupported(s, evidence: evidence)
+    }
+    public static func unsupportedAnswerEvents() -> [QueryEvent] { GroundingCheck.unsupportedAnswerEvents() }
 
     // A-245: consolidation
     // MARK: - Dreaming safety (M8)
@@ -57,17 +59,6 @@ public enum TimeWindow {
             }
         }
 
-    // A-141: grounding
-    // MARK: - Citation integrity (M5)
-        public static func citationIntegritySupported(_ sentence: String, evidence: [Retrieved]) -> Bool {
-            let claim = Verification.stripCitations(sentence).trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !claim.isEmpty else { return true }
-            let corpus = evidence.map { $0.memory.lowercased() }.joined(separator: " ")
-            let tokens = claim.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).filter { $0.count > 3 }
-            guard !tokens.isEmpty else { return true }
-            return tokens.allSatisfy { corpus.contains($0) }
-        }
-        public static func unsupportedAnswerEvents() -> [QueryEvent] { [.state(.unsupportedAnswer)] }
 
     public static func parse(query: String, now: Date = Date()) -> DateInterval? {
         let q = query.lowercased()
@@ -124,11 +115,26 @@ public enum TimeWindow {
     /// Keep only hits whose source falls in the window; if none do, return the
     /// originals (never strand the user with an empty result).
     public static func filter(_ hits: [Retrieved], to window: DateInterval) -> [Retrieved] {
+        filterResult(hits, to: window).hits
+    }
+
+    public struct FilterResult: Equatable, Sendable {
+        public let hits: [Retrieved]
+        public let strictMatch: Bool
+    }
+
+    public static func filterResult(_ hits: [Retrieved], to window: DateInterval) -> FilterResult {
         let parser = ISO8601DateFormatter()
         let inWindow = hits.filter {
             guard let iso = $0.source.updatedAt, let d = parser.date(from: iso) else { return false }
             return window.contains(d)
         }
-        return inWindow.isEmpty ? hits : inWindow
+        if inWindow.isEmpty { return FilterResult(hits: hits, strictMatch: false) }
+        return FilterResult(hits: inWindow, strictMatch: true)
+    }
+
+    /// Agentic grep deadlock prevention when time-window + repeated hops collide.
+    public static func agenticDeadlockSafe(hopQueries: [String]) -> Bool {
+        Phase2Techniques.agenticDeadlockSafe(hopQueries: hopQueries)
     }
 }

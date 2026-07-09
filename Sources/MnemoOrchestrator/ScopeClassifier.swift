@@ -59,17 +59,6 @@ public enum ScopeClassifier {
         public static func indexingTerminalState(path: String) -> TerminalState { .indexing(path: path) }
         public static func ingestionSelfHealSafe(orphanIds: [String]) -> [String] { orphanIds.filter { !$0.isEmpty } }
 
-    // A-135: grounding
-    // MARK: - Citation integrity (M5)
-        public static func citationIntegritySupported(_ sentence: String, evidence: [Retrieved]) -> Bool {
-            let claim = Verification.stripCitations(sentence).trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !claim.isEmpty else { return true }
-            let corpus = evidence.map { $0.memory.lowercased() }.joined(separator: " ")
-            let tokens = claim.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).filter { $0.count > 3 }
-            guard !tokens.isEmpty else { return true }
-            return tokens.allSatisfy { corpus.contains($0) }
-        }
-        public static func unsupportedAnswerEvents() -> [QueryEvent] { [.state(.unsupportedAnswer)] }
 
     private static let chitChat: Set<String> = [
         "hi", "hey", "hello", "yo", "sup", "thanks", "thank you", "thx", "ok", "okay",
@@ -84,6 +73,13 @@ public enum ScopeClassifier {
         // Very short non-question fragments that are pure greetings.
         if q.split(separator: " ").count <= 2 && chitChat.contains(where: { q.hasPrefix($0) }) { return false }
         return true
+    }
+
+    /// Classify scope for mnemoctl and routing — stable JSON via `ScopeClassification`.
+    public static func classify(_ query: String) -> ScopeClassification {
+        let corpus = isCorpusQuestion(query)
+        return ScopeClassification(query: query, isCorpusQuestion: corpus,
+                                   reply: corpus ? nil : reply(for: query))
     }
 
     /// A friendly, honest reply for non-corpus input.

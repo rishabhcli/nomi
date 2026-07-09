@@ -57,17 +57,6 @@ public enum NumericReasoner {
         public static func indexingTerminalState(path: String) -> TerminalState { .indexing(path: path) }
         public static func ingestionSelfHealSafe(orphanIds: [String]) -> [String] { orphanIds.filter { !$0.isEmpty } }
 
-    // A-140: grounding
-    // MARK: - Citation integrity (M5)
-        public static func citationIntegritySupported(_ sentence: String, evidence: [Retrieved]) -> Bool {
-            let claim = Verification.stripCitations(sentence).trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !claim.isEmpty else { return true }
-            let corpus = evidence.map { $0.memory.lowercased() }.joined(separator: " ")
-            let tokens = claim.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).filter { $0.count > 3 }
-            guard !tokens.isEmpty else { return true }
-            return tokens.allSatisfy { corpus.contains($0) }
-        }
-        public static func unsupportedAnswerEvents() -> [QueryEvent] { [.state(.unsupportedAnswer)] }
 
     public static func isNumericQuestion(_ query: String) -> Bool {
         let q = query.lowercased()
@@ -101,5 +90,19 @@ public enum NumericReasoner {
         let df = DateFormatter(); df.dateStyle = .medium
         let chrono = sorted.map { df.string(from: $0) }.joined(separator: ", ")
         return "Dated facts found (chronological): \(chrono). The earliest→latest span is \(days) days (~\(weeks) week\(weeks == 1 ? "" : "s")). If the question asks for the interval between two specific events, identify the correct start and end dates from the evidence and compute from those — use the earliest→latest span only when those are the actual endpoints."
+    }
+
+    /// True when ≥3 dated facts span more than 90 days — global min→max is unreliable.
+    public static func hasDateDistractors(in evidence: [Retrieved]) -> Bool {
+        let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.date.rawValue)
+        var dates: [Date] = []
+        for hit in evidence {
+            let ns = hit.memory as NSString
+            detector?.enumerateMatches(in: hit.memory, range: NSRange(location: 0, length: ns.length)) { m, _, _ in
+                if let d = m?.date { dates.append(d) }
+            }
+        }
+        guard dates.count >= 3, let first = dates.min(), let last = dates.max() else { return false }
+        return last.timeIntervalSince(first) > 90 * 86400
     }
 }

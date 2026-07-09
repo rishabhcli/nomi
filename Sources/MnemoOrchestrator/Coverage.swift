@@ -62,4 +62,10 @@ public enum Coverage {
                       limit: base.limit * 2,
                       container: base.container)
     }
+
+    /// Renderable events when retrieval finds nothing above threshold (AT-M12.9).
+    public static func emptyEvidenceEvents() -> [QueryEvent] {
+        [.state(.empty(nearest: [])),
+         .reasoning(["No evidence above threshold — try broadening the question"])]
+    }
 }

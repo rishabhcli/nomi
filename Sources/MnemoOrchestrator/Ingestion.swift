@@ -13,8 +13,10 @@ import Foundation
 /// four-state machine every consumer reads.
 public enum ItemState: String, Equatable, Sendable {
     // A-128: grounding
-    public static func citationIntegritySupported(_ s: String, evidence: [Retrieved]) -> Bool { !Verification.stripCitations(s).isEmpty }
-    public static func unsupportedAnswerEvents() -> [QueryEvent] { [.state(.unsupportedAnswer)] }
+    public static func citationIntegritySupported(_ s: String, evidence: [Retrieved]) -> Bool {
+        GroundingCheck.citationIntegritySupported(s, evidence: evidence)
+    }
+    public static func unsupportedAnswerEvents() -> [QueryEvent] { GroundingCheck.unsupportedAnswerEvents() }
 
     // A-328: latency
     // MARK: - Scheduling (M11)
@@ -128,7 +130,7 @@ public actor IngestIndex {
         let id = UUID()
         return AsyncStream { c in
             continuations[id] = c
-            c.onTermination = { _ in Task { await self.removeContinuation(id) } }
+            c.onTermination = { @Sendable _ in Task { await self.removeContinuation(id) } }
         }
     }
 
@@ -141,10 +143,8 @@ public actor IngestIndex {
     }
 
     /// Pull the engine's current view and emit any state transitions.
-    /// States are companion-aware: a failed media doc covered by a ready
-    /// on-device-extraction companion presents as ready.
-    public func refresh() async {
-        guard let rows = try? await docs.documentsList(container: container) else { return }
+    public func refresh() async -> Bool {
+        guard let rows = try? await docs.documentsList(container: container) else { return false }
         for row in rows {
             let new = MediaCompanion.effectiveState(of: row, in: rows)
             let old = states[row.id]
@@ -154,6 +154,7 @@ public actor IngestIndex {
             let event = IngestEvent(docId: row.id, path: row.filepath, from: old, to: new)
             for c in continuations.values { c.yield(event) }
         }
+        return true
     }
 
     public func state(of docId: String) -> ItemState? { states[docId] }
@@ -170,5 +171,26 @@ public actor IngestIndex {
 
     public func failedPaths() -> [String] {
         states.filter { $0.value == .error }.compactMap { paths[$0.key] }.sorted()
+    }
+}
+
+/// Subprocess capture with stderr drain — prevents pipe backpressure hangs (M2).
+public enum IngestionSubprocess {
+  public static func capture(_ path: String, _ args: [String]) throws -> String {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: path)
+        p.arguments = args
+        let outPipe = Pipe()
+        let errPipe = Pipe()
+        p.standardOutput = outPipe
+        p.standardError = errPipe
+        try p.run()
+        let errTask = Task.detached {
+            _ = errPipe.fileHandleForReading.readDataToEndOfFile()
+        }
+        let data = outPipe.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
+        errTask.cancel()
+        return String(data: data, encoding: .utf8) ?? ""
     }
 }

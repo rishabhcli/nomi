@@ -15,8 +15,10 @@ public enum LocalExtractor {
     public enum LifecycleBranch: String, Sendable { case routeAmbiguity, emptyEvidence, retry }
 
     // A-158: grounding
-    public static func citationIntegritySupported(_ s: String, evidence: [Retrieved]) -> Bool { !Verification.stripCitations(s).isEmpty }
-    public static func unsupportedAnswerEvents() -> [QueryEvent] { [.state(.unsupportedAnswer)] }
+    public static func citationIntegritySupported(_ s: String, evidence: [Retrieved]) -> Bool {
+        GroundingCheck.citationIntegritySupported(s, evidence: evidence)
+    }
+    public static func unsupportedAnswerEvents() -> [QueryEvent] { GroundingCheck.unsupportedAnswerEvents() }
 
     // A-306: intelligence
     // MARK: - Expressiveness (beats-Siri offline)
@@ -180,4 +182,9 @@ extension LocalExtractor {
             guard let scheduler, await scheduler.shouldBackgroundYield else { return }
         }
     }
+    /// Phase 2: agentic grep deadlock prevention (D-0751+).
+    public static func agenticDeadlockSafe(hopQueries: [String]) -> Bool {
+        Phase2Techniques.agenticDeadlockSafe(hopQueries: hopQueries)
+    }
+
 }

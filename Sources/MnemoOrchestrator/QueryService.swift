@@ -116,6 +116,12 @@ public struct QueryService: QueryServing {
     public static func indexingTerminalState(path: String) -> TerminalState { .indexing(path: path) }
     public static func ingestionSelfHealSafe(orphanIds: [String]) -> [String] { orphanIds.filter { !$0.isEmpty } }
 
+    /// Renderable offline refusal when no network path is available (Phase 2 / M12).
+    public static func offlineRefusalEvents() -> [QueryEvent] {
+        [.reasoning(["Answers come only from your local files — no network path used"]),
+         .state(.engineUnreachable)]
+    }
+
     // A-313: intelligence
     // MARK: - Expressiveness (beats-Siri offline)
         /// Shapes cross-doc synthesis as timeline/table/bullets for offline rendering.
@@ -229,9 +235,9 @@ public struct QueryService: QueryServing {
                     // 1. Route; escalate genuinely ambiguous queries to the model (#4).
                     let routing = router.classify(q0)
                     var intent = routing.intent
+                    continuation.yield(.routed(intent: intent.rawValue, effort: effort.forIntent(intent)))
                     for event in routing.ambiguityEvents() { continuation.yield(event) }
                     if routing.ambiguous, let escalator { intent = await escalator.classify(q0) }
-                    continuation.yield(.routed(intent: intent.rawValue, effort: effort.forIntent(intent)))
 
                     // Out-of-scope / chit-chat (#9): reply plainly, skip retrieval.
                     if !ScopeClassifier.isCorpusQuestion(q0) {
@@ -443,8 +449,11 @@ public struct QueryService: QueryServing {
                     }
                     continuation.yield(.done)
                     continuation.finish()
+                } catch is CancellationError {
+                    continuation.yield(.done)
+                    continuation.finish()
                 } catch {
-                    for event in Self.lifecycleRetryEvents() { continuation.yield(event) }
+                    for event in Self.lifecycleRetryEvents(for: error) { continuation.yield(event) }
                     continuation.yield(.done)
                     continuation.finish()
                 }
@@ -463,8 +472,10 @@ public struct QueryService: QueryServing {
     }
 
     private func absolutePath(_ enginePath: String) -> String {
-        guard !enginePath.isEmpty, !mountRoot.isEmpty, enginePath.hasPrefix("/") else { return enginePath }
-        return mountRoot + enginePath
+        guard !enginePath.isEmpty, !mountRoot.isEmpty else { return enginePath }
+        if enginePath.hasPrefix("/") { return mountRoot + enginePath }
+        let root = mountRoot.hasSuffix("/") ? String(mountRoot.dropLast()) : mountRoot
+        return root + "/" + enginePath
     }
 
     /// Renderable events when the query path throws instead of finishing silently (A-105).
@@ -473,7 +484,21 @@ public struct QueryService: QueryServing {
         "mnemo-\(UInt(bitPattern: query.hashValue))"
     }
 
-    private static func lifecycleRetryEvents() -> [QueryEvent] {
-        [.retrying("That didn't work — try asking again."), .state(.engineUnreachable)]
+    private static func lifecycleRetryEvents(for error: Error) -> [QueryEvent] {
+        let terminal: TerminalState
+        switch error {
+        case let ollama as OllamaError:
+            switch ollama {
+            case .server(let msg) where msg.lowercased().contains("model"):
+                terminal = .modelNotLoaded(model: msg)
+            default:
+                terminal = .engineUnreachable
+            }
+        case is EngineError:
+            terminal = .engineUnreachable
+        default:
+            terminal = .engineUnreachable
+        }
+        return [.retrying("That didn't work — try asking again."), .state(terminal)]
     }
 }

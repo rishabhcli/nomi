@@ -5,6 +5,7 @@ public enum OllamaError: Error, Equatable {
     case notHTTP
     case httpStatus(Int)
     case server(String)   // {"error": "..."} line in the stream
+    case nonLoopbackHost(String)
 }
 
 /// Parses streamed NDJSON lines from Ollama /api/generate (M0, M4).
@@ -39,8 +40,10 @@ public protocol Generating: Sendable {
 /// HTTP client for Ollama streaming generation on 127.0.0.1 (M0, M4).
 public struct OllamaClient: Generating {
     // A-127: grounding
-    public static func citationIntegritySupported(_ s: String, evidence: [Retrieved]) -> Bool { !Verification.stripCitations(s).isEmpty }
-    public static func unsupportedAnswerEvents() -> [QueryEvent] { [.state(.unsupportedAnswer)] }
+    public static func citationIntegritySupported(_ s: String, evidence: [Retrieved]) -> Bool {
+        GroundingCheck.citationIntegritySupported(s, evidence: evidence)
+    }
+    public static func unsupportedAnswerEvents() -> [QueryEvent] { GroundingCheck.unsupportedAnswerEvents() }
 
     // A-327: latency
     // MARK: - Scheduling (M11)
@@ -94,10 +97,18 @@ public struct OllamaClient: Generating {
     let session: URLSession
 
     public init(baseURL: URL, model: String, keepAlive: String = "30m", session: URLSession = .shared) {
+        if let host = baseURL.host, !EgressGuard.isLoopbackHost(host) {
+            preconditionFailure("model runtime must be loopback, got \(host)")
+        }
         self.baseURL = baseURL
         self.model = model
         self.keepAlive = keepAlive
         self.session = session
+    }
+
+    static func parseLoopbackHost(from url: URL) -> String? {
+        guard let host = url.host, EgressGuard.isLoopbackHost(host) else { return nil }
+        return host
     }
 
     struct Body: Encodable {
@@ -112,6 +123,9 @@ public struct OllamaClient: Generating {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
+                    guard Self.parseLoopbackHost(from: baseURL) != nil else {
+                        throw OllamaError.nonLoopbackHost(baseURL.host ?? "?")
+                    }
                     var url = baseURL
                     url.append(path: "/api/generate")
                     var r = URLRequest(url: url)
@@ -135,4 +149,9 @@ public struct OllamaClient: Generating {
             continuation.onTermination = { _ in task.cancel() }
         }
     }
+    /// Phase 2: agentic grep deadlock prevention (D-0751+).
+    public static func agenticDeadlockSafe(hopQueries: [String]) -> Bool {
+        Phase2Techniques.agenticDeadlockSafe(hopQueries: hopQueries)
+    }
+
 }

@@ -24,13 +24,11 @@ public enum TokenEstimate {
 /// trimming lowest-relevance first and capping the preamble so evidence
 /// always gets a share of the budget.
 public struct ContextAssembler: Sendable {
-    // A-169: ingestion
-    public static func indexingTerminalState(path: String) -> TerminalState { .indexing(path: path) }
-    public static func ingestionSelfHealSafe(orphanIds: [String]) -> [String] { orphanIds.filter { !$0.isEmpty } }
-
     // A-125: grounding
-    public static func citationIntegritySupported(_ s: String, evidence: [Retrieved]) -> Bool { !Verification.stripCitations(s).isEmpty }
-    public static func unsupportedAnswerEvents() -> [QueryEvent] { [.state(.unsupportedAnswer)] }
+    public static func citationIntegritySupported(_ s: String, evidence: [Retrieved]) -> Bool {
+        GroundingCheck.citationIntegritySupported(s, evidence: evidence)
+    }
+    public static func unsupportedAnswerEvents() -> [QueryEvent] { GroundingCheck.unsupportedAnswerEvents() }
 
     // A-325: latency
     // MARK: - Scheduling (M11)
@@ -90,8 +88,10 @@ public struct ContextAssembler: Sendable {
     }
 
     public func assemble(intent: Intent, question: String,
-                         profile: Profile, evidence: [Retrieved]) -> AssembledContext {
-        let preamble = buildPreamble(profile, cap: Int(Double(tokenBudget) * preambleFraction))
+                         profile: Profile, evidence: [Retrieved],
+                         activeFactTexts: Set<String>? = nil) -> AssembledContext {
+        let liveProfile = activeFactTexts.map { MemoryFactFilter.filterProfile(profile, activeTexts: $0) } ?? profile
+        let preamble = buildPreamble(liveProfile, cap: Int(Double(tokenBudget) * preambleFraction))
         let remaining = max(0, tokenBudget - TokenEstimate.of(preamble))
 
         // Highest similarity first; keep while it fits.
@@ -122,6 +122,19 @@ public struct ContextAssembler: Sendable {
         add("stable", profile.statics)
         add("current", profile.dynamics)
         if lines.count == 1 { lines.append("- (no profile facts yet)") }
+        lines.append("<!-- profile-stamp:\(used) -->")
         return lines.joined(separator: "\n")
     }
+
+    /// Detect stale preamble: facts no longer in the active memory set.
+    public static func staleFacts(in profile: Profile, activeTexts: Set<String>) -> [String] {
+        let normalizedActive = Set(activeTexts.map { ProfileDedupe.normalize($0) })
+        let all = profile.statics + profile.dynamics
+        return all.filter { !normalizedActive.contains(ProfileDedupe.normalize($0)) }
+    }
+    /// Phase 2: agentic grep deadlock prevention (D-0751+).
+    public static func agenticDeadlockSafe(hopQueries: [String]) -> Bool {
+        Phase2Techniques.agenticDeadlockSafe(hopQueries: hopQueries)
+    }
+
 }

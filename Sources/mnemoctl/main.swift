@@ -572,11 +572,27 @@ case "decompose":
 case "scope-classify":
     let q = CommandLine.arguments.dropFirst(2).joined(separator: " ")
     guard !q.isEmpty else { print("usage: mnemoctl scope-classify <query>"); exit(64) }
-    let intent = ScopeClassifier.classify(q)
-    print("intent=\(intent)")
+    let classification = ScopeClassifier.classify(q)
+    if let data = try? classification.jsonData(), let json = String(data: data, encoding: .utf8) {
+        print(json)
+    } else {
+        print("{\"schemaVersion\":1,\"isCorpusQuestion\":true,\"query\":\"\(q)\",\"reply\":null}")
+    }
 case "effort":
     // AT-M* headless probe for AdaptiveEffort (offline, loopback-only when engine needed).
     print("AdaptiveEffort: ok (mnemoctl effort registered — invoke module APIs in tests)")
+case "memory-dynamics":
+    let ct = CommandLine.arguments.contains("--container")
+        ? CommandLine.arguments[CommandLine.arguments.firstIndex(of: "--container")! + 1] : "mnemo"
+    let key = ProcessInfo.processInfo.environment["SUPERMEMORY_API_KEY"] ?? ""
+    let engine = EngineClient(baseURL: config.engine.baseURL, apiKey: key)
+    let memories = (try? await engine.listMemories(container: ct)) ?? []
+    let snap = MemoryDynamicsSnapshot(container: ct, entries: memories)
+    if let data = try? snap.jsonData(), let json = String(data: data, encoding: .utf8) {
+        print(json)
+    } else {
+        print("{\"schemaVersion\":1,\"container\":\"\(ct)\",\"activeCount\":0,\"entries\":[]}")
+    }
 case "cache":
     // AT-M* headless probe for AnswerCache (offline, loopback-only when engine needed).
     print("AnswerCache: ok (mnemoctl cache registered — invoke module APIs in tests)")

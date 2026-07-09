@@ -4,6 +4,7 @@ import Foundation
 public enum EngineError: Error, Equatable {
     case httpStatus(Int)
     case notHTTP
+    case nonLoopbackHost(String)
 }
 
 /// HTTP client for the local self-hosted engine on 127.0.0.1 (M1, M2).
@@ -64,9 +65,36 @@ public struct EngineClient: Retrieving {
     let apiKey: String
     let session: URLSession
     public init(baseURL: URL, apiKey: String, session: URLSession = .shared) {
+        if let host = baseURL.host, !EgressGuard.isLoopbackHost(host) {
+            preconditionFailure("engine base_url must be loopback, got \(host)")
+        }
         self.baseURL = baseURL
         self.apiKey = apiKey
         self.session = session
+    }
+
+    /// Reject poisoned wire rows: remote file paths or cross-container tag injection.
+    static func isPoisonedWireResult(_ w: WireResult, expectedContainer: String?) -> Bool {
+        if let path = w.filepath, isRemoteURL(path) { return true }
+        if let metaPath = w.metadata?.strings[MediaCompanion.originalPathKey], isRemoteURL(metaPath) { return true }
+        if let tag = expectedContainer, let tags = w.metadata?.strings["containerTag"], tags != tag { return true }
+        return false
+    }
+
+    static func isRemoteURL(_ s: String) -> Bool {
+        let lower = s.lowercased()
+        return lower.hasPrefix("http://") || lower.hasPrefix("https://")
+    }
+
+    /// Stable cache-safe identity for a wire row (resists field-reorder poisoning).
+    static func wireResultIdentity(_ w: WireResult) -> String {
+        let docId = w.documents?.first?.id ?? ""
+        let text = w.memory ?? w.chunk ?? ""
+        return "\(docId)|\(text)"
+    }
+
+    static func sanitizeEnginePath(_ path: String) -> String {
+        isRemoteURL(path) ? "" : path
     }
 
     // MARK: - /v4/search wire format (captured from the live engine)
@@ -99,7 +127,8 @@ public struct EngineClient: Retrieving {
     static func mapWireResult(_ w: WireResult) -> Retrieved? {
         guard let text = w.memory ?? w.chunk else { return nil }
         let doc = w.documents?.first
-        let path = w.filepath ?? w.metadata?.strings[MediaCompanion.originalPathKey] ?? ""
+        let rawPath = w.filepath ?? w.metadata?.strings[MediaCompanion.originalPathKey] ?? ""
+        let path = sanitizeEnginePath(rawPath)
         return Retrieved(
             memory: text,
             similarity: w.similarity ?? 0,
@@ -120,7 +149,9 @@ public struct EngineClient: Retrieving {
         let (data, resp) = try await session.data(for: r)
         guard let http = resp as? HTTPURLResponse else { throw EngineError.notHTTP }
         guard http.statusCode == 200 else { throw EngineError.httpStatus(http.statusCode) }
-        return try JSONDecoder().decode(Response.self, from: data).results.compactMap(Self.mapWireResult)
+        return try JSONDecoder().decode(Response.self, from: data).results
+            .filter { !Self.isPoisonedWireResult($0, expectedContainer: req.container) }
+            .compactMap(Self.mapWireResult)
     }
 
     /// Lifecycle events when hybrid search spans both memories and documents (A-109).
