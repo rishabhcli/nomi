@@ -35,3 +35,4 @@
 {"n": 35, "id": "C-035", "title": "Foundation: config/audit gate #35", "phase": "foundation", "purpose": "Harden `TOML.swift` parser against malformed `mnemo.toml` \u2014 fail closed with line numbers."}
 {"n": 36, "id": "C-036", "title": "Foundation: config/audit gate #36", "phase": "foundation", "purpose": "Validate `MnemoConfig.swift` rejects cloud hosts, LAN binds, and backing-store mismatch at startup with tested exit codes 3/0."}
 {"n": 37, "id": "C-037", "title": "Foundation: config/audit gate #37", "phase": "foundation", "purpose": "Extend `LoopbackAudit.swift` to parse `lsof` output for Rivet/smfs edge ports; document in `mnemoctl audit` help."}
+{"n": 38, "id": "C-038", "title": "Foundation: config/audit gate #38", "phase": "foundation", "purpose": "Ensure `StackHealth.swift` aggregates ollama+engine+smfs with actionable unhealthy reasons."}
