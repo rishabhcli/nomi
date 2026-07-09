@@ -65,6 +65,8 @@ struct NotchSurfaceView: View {
                 radius: Surface.shadowRadius, y: Surface.shadowY)
         .overlay(alignment: .bottomLeading) { privacyDot }
         .animation(Motion.adaptive(spring, reduceMotion: reduceMotion), value: geo)
+        .onAppear { vm.reduceMotion = reduceMotion }
+        .onChange(of: reduceMotion) { _, v in vm.reduceMotion = v }
         .contentShape(Rectangle())
         .gesture(holdToDictate)
         .onTapGesture {

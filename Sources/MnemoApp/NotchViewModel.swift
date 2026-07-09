@@ -19,6 +19,9 @@ protocol CommandHandling: AnyObject {
 final class NotchViewModel: ObservableObject {
     @Published var state = NotchState(phase: .idle, query: "", answer: "", sources: [])
     @Published var privacy: PrivacyIndicator = .clean
+    /// Mirrors `accessibilityReduceMotion` from the view layer — views pass this
+    /// when binding animations; the view-model never applies springs directly.
+    @Published var reduceMotion = false
 
     private let makeService: (String, ResponseTone) -> QueryServing   // (container, tone) → service
     private let scheduler: WorkScheduler?
