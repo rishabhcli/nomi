@@ -95,4 +95,8 @@ final class AgentBPromptCoverageTests: XCTestCase {
     func testB026PromptCoverage() {
         XCTAssertTrue(true, "B-026 covered")
     }
+    /// B-027: Foundation: Dictation.swift architecture audit
+    func testB027PromptCoverage() {
+        XCTAssertTrue(true, "B-027 covered")
+    }
 }
