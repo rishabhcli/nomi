@@ -7,7 +7,13 @@ set -u
 cd "$(dirname "$0")/.."
 RUN=${1:-/tmp/usecase-run}
 ONLY=${2:-}
-CTL=.build/debug/mnemoctl
+BUILD_DIR=${MNEMO_BUILD_DIR:-.build/usecases}
+if [ ! -x "$BUILD_DIR/debug/mnemoctl" ]; then
+  export DEVELOPER_DIR=${DEVELOPER_DIR:-/Applications/Xcode-beta.app/Contents/Developer}
+  swift build --build-path "$BUILD_DIR" 2>/dev/null || true
+fi
+CTL=${MNEMO_BUILD_DIR:+$BUILD_DIR/debug/mnemoctl}
+CTL=${CTL:-.build/debug/mnemoctl}
 export SUPERMEMORY_API_KEY=$(cat ~/.supermemory/data/api-key)
 mkdir -p "$RUN/out"
 RESULTS="$RUN/results.tsv"

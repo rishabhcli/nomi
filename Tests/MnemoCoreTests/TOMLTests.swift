@@ -25,4 +25,14 @@ final class TOMLTests: XCTestCase {
         let t = try TOML.parse("[x]\n a = \"v\"   # trailing\n")
         XCTAssertEqual(t["x"]?["a"], .string("v"))
     }
+
+    func testMalformedLineIncludesLineNumber() {
+        XCTAssertThrowsError(try TOML.parse("[x]\nnot_a_valid_line\n")) { err in
+            if case let TOMLError.malformedLine(_, line) = err {
+                XCTAssertEqual(line, 2)
+            } else {
+                XCTFail("expected malformedLine with line number")
+            }
+        }
+    }
 }

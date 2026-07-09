@@ -33,6 +33,10 @@ do { try config.validateInvariant() } catch {
 }
 
 let arg = CommandLine.arguments.dropFirst().first ?? "health"
+if MnemoCLI.wantsHelp {
+    MnemoCLI.printHelp(command: arg == "health" ? nil : arg)
+    exit(0)
+}
 let launcher = SystemProcessLauncher(config: config)
 let sup = ProcessSupervisor(config: config, launcher: launcher, probe: HTTPHealthProbe())
 
@@ -47,24 +51,11 @@ case "restart-engine":
     try await sup.restart(.engine)
     print("engine restarted")
 case "audit":
-    let out = (try? launcher.capture("/usr/sbin/lsof", ["-iTCP", "-sTCP:LISTEN", "-n", "-P"])) ?? ""
-    let ours = LoopbackAudit.parseLSOF(out).filter { s in
-        ["ollama", "supermemory-server", "supermem", "smfs", "mnemo"].contains { s.command.lowercased().hasPrefix($0) }
-    }
-    let bad = LoopbackAudit.nonLoopback(ours)
-    if bad.isEmpty {
-        print("loopback OK (\(ours.count) mnemo-owned listeners, all 127.0.0.1)")
-    } else {
-        print("NON-LOOPBACK: \(bad)")
-        exit(4)
-    }
+    runAudit(launcher: launcher)
 case "health":
     let h = await sup.health()
-    print("ollama: up=\(h.ollama.isRunning) addr=\(h.ollama.boundAddress ?? "-")")
-    print("engine: up=\(h.engine.isRunning) addr=\(h.engine.boundAddress ?? "-")")
-    print("smfs:   up=\(h.smfs.isRunning) addr=\(h.smfs.boundAddress ?? "-")")
-    print("allHealthyAndLoopback=\(h.allHealthyAndLoopback)")
-    if !h.allHealthyAndLoopback { exit(1) }
+    printHealth(h, config: config, verbose: MnemoCLI.verbose)
+    if !h.allHealthyAndLoopback { exit(MnemoExitCode.healthFailure.rawValue) }
 case "ask":
     // Headless query path — same wiring as the app (AT-M1.* from the terminal).
     // --then <q2> runs a second turn threading the first turn as history
@@ -106,19 +97,32 @@ case "ask":
         documentSearchEnabled: true,
         conversationSink: engine,
         chatRecallEnabled: true)
+    let logSink = makeLogSink()
     func runAsk(_ question: String, history: [Turn]) async throws -> String {
         var sawToken = false
         var answer = ""
+        var entry = QueryLogEntry()
+        entry.modelId = config.model.synthesis
+        let t0 = Date()
+        var hopCount = 0
+        var verified = 0
+        var checked = 0
         for try await event in service.ask(question, history: history) {
             switch event {
             case .routed(let intent, let effort):
-                print("[route] \(intent) (effort: \(effort))")
+                entry.routeIntent = intent
+                entry.effortTier = effort
+                if MnemoCLI.verbose { print("[route] \(intent) (effort: \(effort))") }
+                else { print("[route] \(intent) (effort: \(effort))") }
             case .understanding(let phrase):
-                print("[understanding] \(phrase)")
+                if MnemoCLI.verbose { print("[understanding] \(phrase)") }
             case .sources(let cards):
                 // Event-order proof for AT-M1.4: this line must print before any token.
                 print("[sources] \(cards.map { "\($0.title) <\($0.path)>" }.joined(separator: ", "))")
             case .token(let t):
+                if entry.firstTokenMs == nil {
+                    entry.firstTokenMs = Int(Date().timeIntervalSince(t0) * 1000)
+                }
                 if !sawToken { print("[answer] ", terminator: ""); sawToken = true }
                 print(t, terminator: "")
                 fflush(stdout)
@@ -126,21 +130,30 @@ case "ask":
             case .retrying(let reason):
                 print("\n[retrying] \(reason)"); sawToken = false; answer = ""
             case .entities(let ents):
-                print("\n[entities] \(ents.joined(separator: " · "))")
+                if MnemoCLI.verbose { print("\n[entities] \(ents.joined(separator: " · "))") }
             case .reasoning(let steps):
-                print("[reasoning] \(steps.joined(separator: " → "))")
+                hopCount += 1
+                if MnemoCLI.verbose { print("[reasoning] \(steps.joined(separator: " → "))") }
             case .citation(let idx, let supported):
+                checked += 1
+                if supported { verified += 1 }
                 if !supported { print("\n[citation] sentence \(idx): UNSUPPORTED") }
             case .suggestions(let chips):
-                print("\n[follow-ups] \(chips.joined(separator: " · "))")
+                if MnemoCLI.verbose { print("\n[follow-ups] \(chips.joined(separator: " · "))") }
             case .related(let docs):
-                print("[see also] \(docs.map(\.title).joined(separator: " · "))")
+                if MnemoCLI.verbose { print("[see also] \(docs.map(\.title).joined(separator: " · "))") }
             case .state(let terminal):
+                entry.terminalState = String(describing: terminal)
                 print("[state] \(terminal): \(NotchReducer.message(for: terminal))")
             case .done:
                 print("\n[done]")
             }
         }
+        entry.retrievalHopCount = hopCount
+        entry.totalMs = Int(Date().timeIntervalSince(t0) * 1000)
+        entry.egressBlockedCount = LoopbackGuardURLProtocol.blockedCount
+        if checked > 0 { entry.verificationPassRate = Double(verified) / Double(checked) }
+        await logSink.emit(entry)
         return answer
     }
     do {
@@ -376,21 +389,7 @@ case "inspect":
         print("usage: mnemoctl inspect [show|delete <id> <text>|correct <id> <newText>] [--container <tag>]")
     }
 case "egress-check":
-    // AT-M10.3: prove the in-process guard blocks a deliberate non-loopback call.
-    LoopbackGuardURLProtocol.reset()
-    let cfg = URLSessionConfiguration.ephemeral
-    cfg.installEgressGuard()
-    let session = URLSession(configuration: cfg)
-    let probe = URL(string: "https://api.supermemory.ai/v4/search")!
-    do {
-        _ = try await session.data(from: probe)
-        print("FAIL: egress was NOT blocked"); exit(1)
-    } catch {
-        print("guard blocked deliberate egress to api.supermemory.ai; blockedCount=\(LoopbackGuardURLProtocol.blockedCount)")
-    }
-    // And confirm loopback still works through the same guarded session.
-    let engineUp = (try? await session.data(from: config.engine.baseURL.appending(path: "/v3/settings"))) != nil
-    print("loopback through guarded session: \(engineUp ? "OK" : "unreachable")")
+    await runEgressCheck(config: config)
 case "bench":
     // Latency SLO report (M11): first-token + total, warm-model check, and the
     // same run with a background ingest hammering the engine (no-stall check).
@@ -489,6 +488,10 @@ case "hash":
     }
     print(try ContentHash.sha256(of: URL(fileURLWithPath: (path as NSString).expandingTildeInPath)))
 default:
-    print("usage: mnemoctl [start|stop|restart-engine|audit|health|ask <q>|ingest-status|watch-ingest [s]|hash <path>]")
-    exit(64)
+    if arg == "--help" || arg == "-h" {
+        MnemoCLI.printHelp()
+        exit(0)
+    }
+    MnemoCLI.printHelp()
+    exit(MnemoExitCode.usage.rawValue)
 }
