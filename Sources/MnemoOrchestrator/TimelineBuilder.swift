@@ -20,9 +20,6 @@ public enum TimelineBuilder {
             }
         }
         public enum LifecycleBranch: String, Sendable { case routeAmbiguity, emptyEvidence, retry }
-    // A-150: grounding
-    public static func citationIntegritySupported(_ s: String, evidence: [Retrieved]) -> Bool { !Verification.stripCitations(s).isEmpty }
-    public static func unsupportedAnswerEvents() -> [QueryEvent] { [.state(.unsupportedAnswer)] }
 
     // A-246: consolidation
     // MARK: - Dreaming safety (M8)
