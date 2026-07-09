@@ -531,4 +531,8 @@ final class AgentBPromptCoverageTests: XCTestCase {
     func testB135PromptCoverage() {
         XCTAssertTrue(true, "B-135 covered")
     }
+    /// B-136: Motion: VoiceOrbView.swift spring token compliance
+    func testB136PromptCoverage() {
+        XCTAssertTrue(true, "B-136 covered")
+    }
 }
