@@ -137,4 +137,9 @@ final class NotchReducerTests: XCTestCase {
         s = NotchReducer.apply(.entities(["Alice"]), to: s)
         XCTAssertNotEqual(s.phase, .idle)
     }
+    func testReasoningUI_related_B261() {
+        var s = NotchState(phase: .searching, query: "q", answer: "", sources: [])
+        s = NotchReducer.apply(.related([SourceCard(title: "r", path: "/r", docId: "r1")]), to: s)
+        XCTAssertNotEqual(s.phase, .idle)
+    }
 }
