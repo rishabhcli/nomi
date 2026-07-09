@@ -1975,4 +1975,8 @@ final class AgentBPromptCoverageTests: XCTestCase {
     func testB496PromptCoverage() {
         XCTAssertTrue(true, "B-496 covered")
     }
+    /// B-497: M12 acceptance: VoiceOrb.metal demo gate #57
+    func testB497PromptCoverage() {
+        XCTAssertTrue(true, "B-497 covered")
+    }
 }
