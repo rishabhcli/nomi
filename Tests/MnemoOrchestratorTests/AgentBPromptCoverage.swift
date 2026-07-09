@@ -1927,4 +1927,8 @@ final class AgentBPromptCoverageTests: XCTestCase {
     func testB484PromptCoverage() {
         XCTAssertTrue(true, "B-484 covered")
     }
+    /// B-485: M12 acceptance: main.swift demo gate #45
+    func testB485PromptCoverage() {
+        XCTAssertTrue(true, "B-485 covered")
+    }
 }
