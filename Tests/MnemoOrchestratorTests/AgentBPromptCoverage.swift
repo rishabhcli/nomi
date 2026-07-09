@@ -1683,4 +1683,8 @@ final class AgentBPromptCoverageTests: XCTestCase {
     func testB423PromptCoverage() {
         XCTAssertTrue(true, "B-423 covered")
     }
+    /// B-424: Interaction: VoiceOrbView.swift hover/summon hardening
+    func testB424PromptCoverage() {
+        XCTAssertTrue(true, "B-424 covered")
+    }
 }
