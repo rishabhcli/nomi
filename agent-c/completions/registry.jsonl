@@ -11,3 +11,4 @@
 {"n": 11, "id": "C-011", "title": "Foundation: config/audit gate #11", "phase": "foundation", "purpose": "Validate `MnemoConfig.swift` rejects cloud hosts, LAN binds, and backing-store mismatch at startup with tested exit codes 3/0."}
 {"n": 12, "id": "C-012", "title": "Foundation: config/audit gate #12", "phase": "foundation", "purpose": "Extend `LoopbackAudit.swift` to parse `lsof` output for Rivet/smfs edge ports; document in `mnemoctl audit` help."}
 {"n": 13, "id": "C-013", "title": "Foundation: config/audit gate #13", "phase": "foundation", "purpose": "Ensure `StackHealth.swift` aggregates ollama+engine+smfs with actionable unhealthy reasons."}
+{"n": 14, "id": "C-014", "title": "Foundation: config/audit gate #14", "phase": "foundation", "purpose": "Add version stamp to `MnemoCore/Placeholder.swift` from git tag or build flag \u2014 surface in `mnemoctl health`."}
