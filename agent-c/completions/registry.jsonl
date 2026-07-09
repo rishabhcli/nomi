@@ -84,3 +84,4 @@
 {"n": 84, "id": "C-084", "title": "Config wire: [ui] summon_hotkey", "phase": "config-wiring", "purpose": "Load global hotkey from config instead of hardcoding."}
 {"n": 85, "id": "C-085", "title": "Config wire: [ui] glass_prominence", "phase": "config-wiring", "purpose": "Expose glass style token from config."}
 {"n": 86, "id": "C-086", "title": "Config wire: [sla] sources_render_ms", "phase": "config-wiring", "purpose": "Add automated test that sources render within SLA."}
+{"n": 87, "id": "C-087", "title": "Config wire: [sla] first_token_ms", "phase": "config-wiring", "purpose": "Wire bench thresholds to config validation warnings."}
