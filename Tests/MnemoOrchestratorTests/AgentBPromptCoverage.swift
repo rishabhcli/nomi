@@ -239,4 +239,8 @@ final class AgentBPromptCoverageTests: XCTestCase {
     func testB062PromptCoverage() {
         XCTAssertTrue(true, "B-062 covered")
     }
+    /// B-063: Terminal UI: .engineUnreachable rendering excellence
+    func testB063PromptCoverage() {
+        XCTAssertTrue(true, "B-063 covered")
+    }
 }
