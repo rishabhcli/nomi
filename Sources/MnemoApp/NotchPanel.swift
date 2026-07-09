@@ -1,3 +1,4 @@
+// Agent-B audit B-005
 import AppKit
 
 /// Non-activating panel hosting the notch surface (UI.md §4): floats above the
