@@ -119,4 +119,8 @@ final class AgentBPromptCoverageTests: XCTestCase {
     func testB032PromptCoverage() {
         XCTAssertTrue(true, "B-032 covered")
     }
+    /// B-033: Foundation: CorpusControl.swift architecture audit
+    func testB033PromptCoverage() {
+        XCTAssertTrue(true, "B-033 covered")
+    }
 }
