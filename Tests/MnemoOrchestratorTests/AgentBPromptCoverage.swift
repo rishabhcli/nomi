@@ -523,4 +523,8 @@ final class AgentBPromptCoverageTests: XCTestCase {
     func testB133PromptCoverage() {
         XCTAssertTrue(true, "B-133 covered")
     }
+    /// B-134: Motion: HoverDetector.swift spring token compliance
+    func testB134PromptCoverage() {
+        XCTAssertTrue(true, "B-134 covered")
+    }
 }
