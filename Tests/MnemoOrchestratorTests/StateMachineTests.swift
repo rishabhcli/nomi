@@ -228,6 +228,12 @@ final class TerminalStateRenderTests: XCTestCase {
         XCTAssertFalse(msg.isEmpty)
     }
 
+
+    func testTerminalUI_emptyCorpus_B073() {
+        let msg = NotchReducer.message(for: TerminalState.emptyCorpus)
+        XCTAssertFalse(msg.isEmpty)
+    }
+
 final class EmptyResultRoutingTests: XCTestCase {
     /// AT-M12.9: below-threshold results surface nearest matches + broaden,
     /// not a blank refusal, when the retriever returns weak hits.
