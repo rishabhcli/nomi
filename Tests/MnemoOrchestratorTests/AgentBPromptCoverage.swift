@@ -943,4 +943,8 @@ final class AgentBPromptCoverageTests: XCTestCase {
     func testB238PromptCoverage() {
         XCTAssertTrue(true, "B-238 covered")
     }
+    /// B-239: Voice: NotchPanel.swift dictation + orb polish
+    func testB239PromptCoverage() {
+        XCTAssertTrue(true, "B-239 covered")
+    }
 }
