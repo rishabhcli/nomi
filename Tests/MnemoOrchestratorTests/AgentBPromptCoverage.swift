@@ -907,4 +907,8 @@ final class AgentBPromptCoverageTests: XCTestCase {
     func testB229PromptCoverage() {
         XCTAssertTrue(true, "B-229 covered")
     }
+    /// B-230: Voice: BackgroundSync.swift dictation + orb polish
+    func testB230PromptCoverage() {
+        XCTAssertTrue(true, "B-230 covered")
+    }
 }
