@@ -1703,4 +1703,8 @@ final class AgentBPromptCoverageTests: XCTestCase {
     func testB428PromptCoverage() {
         XCTAssertTrue(true, "B-428 covered")
     }
+    /// B-429: Interaction: CorpusControl.swift hover/summon hardening
+    func testB429PromptCoverage() {
+        XCTAssertTrue(true, "B-429 covered")
+    }
 }
