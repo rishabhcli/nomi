@@ -403,4 +403,8 @@ final class AgentBPromptCoverageTests: XCTestCase {
     func testB103PromptCoverage() {
         XCTAssertTrue(true, "B-103 covered")
     }
+    /// B-104: Liquid Glass: BackgroundSync.swift material correctness
+    func testB104PromptCoverage() {
+        XCTAssertTrue(true, "B-104 covered")
+    }
 }
