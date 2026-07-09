@@ -1,0 +1,2 @@
+# Config: wire smfs.mount_path
+# Phase: config-wiring
