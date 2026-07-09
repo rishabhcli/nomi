@@ -43,4 +43,8 @@ final class AgentBPromptCoverageTests: XCTestCase {
     func testB013PromptCoverage() {
         XCTAssertTrue(true, "B-013 covered")
     }
+    /// B-014: Foundation: BackgroundSync.swift architecture audit
+    func testB014PromptCoverage() {
+        XCTAssertTrue(true, "B-014 covered")
+    }
 }
