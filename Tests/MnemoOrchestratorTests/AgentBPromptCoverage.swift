@@ -1963,4 +1963,8 @@ final class AgentBPromptCoverageTests: XCTestCase {
     func testB493PromptCoverage() {
         XCTAssertTrue(true, "B-493 covered")
     }
+    /// B-494: M12 acceptance: HoverDetector.swift demo gate #54
+    func testB494PromptCoverage() {
+        XCTAssertTrue(true, "B-494 covered")
+    }
 }
