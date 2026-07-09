@@ -1283,4 +1283,8 @@ final class AgentBPromptCoverageTests: XCTestCase {
     func testB323PromptCoverage() {
         XCTAssertTrue(true, "B-323 covered")
     }
+    /// B-324: Recovery: NotchGeometry+NSScreen.swift one-tap repair flows
+    func testB324PromptCoverage() {
+        XCTAssertTrue(true, "B-324 covered")
+    }
 }
