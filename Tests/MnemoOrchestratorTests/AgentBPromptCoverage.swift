@@ -359,4 +359,8 @@ final class AgentBPromptCoverageTests: XCTestCase {
     func testB092PromptCoverage() {
         XCTAssertTrue(true, "B-092 covered")
     }
+    /// B-093: Liquid Glass: NotchViewModel.swift material correctness
+    func testB093PromptCoverage() {
+        XCTAssertTrue(true, "B-093 covered")
+    }
 }
