@@ -1,1 +1,2 @@
 {"n": 1, "id": "C-001", "title": "Foundation: config/audit gate #1", "phase": "foundation", "purpose": "Validate `MnemoConfig.swift` rejects cloud hosts, LAN binds, and backing-store mismatch at startup with tested exit codes 3/0."}
+{"n": 2, "id": "C-002", "title": "Foundation: config/audit gate #2", "phase": "foundation", "purpose": "Extend `LoopbackAudit.swift` to parse `lsof` output for Rivet/smfs edge ports; document in `mnemoctl audit` help."}
