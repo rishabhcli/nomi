@@ -19,4 +19,22 @@ final class NotchReducerTests: XCTestCase {
         s = NotchReducer.apply(.routed(intent: "synthesis", effort: "medium"), to: s)
         XCTAssertEqual(s.phase, .searching)
     }
+
+    // B-001: view-local chrome maps to reducer phases — no orphan state.
+    func testSurfacePhaseBindingRetainsAnswerHeightOnlyWhileAnswering() {
+        XCTAssertTrue(NotchSurfacePhaseBinding.shouldRetainAnswerHeight(phase: .answering, listening: false))
+        XCTAssertTrue(NotchSurfacePhaseBinding.shouldRetainAnswerHeight(phase: .state, listening: false))
+        XCTAssertFalse(NotchSurfacePhaseBinding.shouldRetainAnswerHeight(phase: .input, listening: false))
+        XCTAssertFalse(NotchSurfacePhaseBinding.shouldRetainAnswerHeight(phase: .searching, listening: false))
+        XCTAssertFalse(NotchSurfacePhaseBinding.shouldRetainAnswerHeight(phase: .answering, listening: true))
+    }
+
+    func testSurfacePhaseBindingTrayAndFocus() {
+        XCTAssertTrue(NotchSurfacePhaseBinding.showsTray(phase: .input, listening: false))
+        XCTAssertFalse(NotchSurfacePhaseBinding.showsTray(phase: .idle, listening: false))
+        XCTAssertFalse(NotchSurfacePhaseBinding.showsTray(phase: .input, listening: true))
+        XCTAssertTrue(NotchSurfacePhaseBinding.shouldFocusInput(phase: .input))
+        XCTAssertTrue(NotchSurfacePhaseBinding.shouldFocusInput(phase: .answering))
+        XCTAssertFalse(NotchSurfacePhaseBinding.shouldFocusInput(phase: .searching))
+    }
 }

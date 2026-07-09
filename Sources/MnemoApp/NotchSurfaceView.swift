@@ -24,13 +24,10 @@ struct NotchSurfaceView: View {
 
     private var phase: NotchPhase { vm.state.phase }
     private var listening: Bool { dictation.isListening }
-    /// The glass tray shows in every expanded state except the listening drop.
-    private var showsTray: Bool { phase != .idle && !listening }
-    /// The pull-handle appears ONLY when there is a real conversation that
-    /// overflows the cap — i.e. there is more to scroll to. Never in the empty
-    /// input or the working/searching state.
+    /// Derived from `NotchSurfacePhaseBinding` — no orphan UI state.
+    private var showsTray: Bool { NotchSurfacePhaseBinding.showsTray(phase: phase, listening: listening) }
     private var showsHandle: Bool {
-        (phase == .answering || phase == .state) && answerHeight > Surface.answerCap
+        NotchSurfacePhaseBinding.showsHandle(phase: phase, answerHeight: answerHeight, cap: Surface.answerCap)
     }
 
     /// One value drives width + height + radius so exactly one spring runs.
@@ -81,11 +78,25 @@ struct NotchSurfaceView: View {
         }
         .background(shortcuts)
         .onExitCommand { NSApp.sendAction(#selector(AppDelegate.dismissNotch), to: nil, from: nil) }
-        .onChange(of: phase) { _, p in if p == .input || p == .answering { focused = true } }
+        .onChange(of: phase) { _, p in
+            if NotchSurfacePhaseBinding.shouldFocusInput(phase: p) { focused = true }
+            if !NotchSurfacePhaseBinding.shouldRetainAnswerHeight(phase: p, listening: listening) {
+                answerHeight = 0
+            }
+        }
+        .onChange(of: listening) { _, nowListening in
+            if !NotchSurfacePhaseBinding.shouldRetainAnswerHeight(phase: phase, listening: nowListening) {
+                answerHeight = 0
+            }
+        }
         // The transcript→query bridge lives on the ALWAYS-mounted surface — the
         // tray (which used to hold it) is unmounted during the listening drop,
         // so binding it here is what lets a dictated phrase reach submit.
-        .onChange(of: dictation.transcript) { _, t in if !t.isEmpty { vm.state.query = t } }
+        .onChange(of: dictation.transcript) { _, t in
+            guard NotchSurfacePhaseBinding.acceptsDictationTranscript(phase: phase, listening: listening),
+                  !t.isEmpty else { return }
+            vm.state.query = t
+        }
         // A dictation failure (denied permission, no model, no mic) has no body
         // space of its own in the input/drop states — surface it as a visible
         // message instead of failing silently.
@@ -142,7 +153,7 @@ struct NotchSurfaceView: View {
 
     /// Privacy folded into a tiny dot: green = 0 egress.
     @ViewBuilder private var privacyDot: some View {
-        if phase != .idle {
+        if NotchSurfacePhaseBinding.showsPrivacyDot(phase: phase) {
             Circle()
                 .fill(vm.privacy == .clean ? Color.green.opacity(0.85) : Color.orange)
                 .frame(width: 4, height: 4)
