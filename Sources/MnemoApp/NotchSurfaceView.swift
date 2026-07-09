@@ -24,6 +24,9 @@ struct NotchSurfaceView: View {
     @FocusState private var focused: Bool
     @State private var answerHeight: CGFloat = 0   // measured once per content change
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorSchemeContrast) private var colorContrast
+
+    private var highContrast: Bool { colorContrast == .increased }
 
     private var phase: NotchPhase { vm.state.phase }
     private var listening: Bool { dictation.isListening }
@@ -39,7 +42,14 @@ struct NotchSurfaceView: View {
                         notch: notchSize, answerHeight: answerHeight)
     }
 
-    private var spring: Animation { phase == .idle ? Motion.collapse : Motion.grow }
+    private var spring: Animation {
+        // Perceived latency: summon uses a snappier spring than phase morphs.
+        if phase == .idle { return Motion.collapse }
+        if phase == .input && vm.state.answer.isEmpty && vm.state.query.isEmpty {
+            return Motion.summon
+        }
+        return Motion.grow
+    }
 
     var body: some View {
         surface.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -112,7 +122,7 @@ struct NotchSurfaceView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Mnemo")
-        .accessibilityHint("Ask, or hold to dictate")
+        .accessibilityHint(SurfaceUX.DictationDiscoverability.accessibilityHint)
     }
 
     /// The body is opaque #000 (indistinguishable from the hardware notch). The
@@ -158,19 +168,23 @@ struct NotchSurfaceView: View {
 
     /// Privacy folded into a tiny dot: green = 0 egress.
     @ViewBuilder private var privacyDot: some View {
-        if NotchSurfacePhaseBinding.showsPrivacyDot(phase: phase) {
+        if SurfaceUX.PerceivedLatency.privacyDotVisibleImmediately(phase: phase),
+           NotchSurfacePhaseBinding.showsPrivacyDot(phase: phase) {
             Circle()
-                .fill(vm.privacy == .clean ? Color.green.opacity(0.85) : Color.orange)
-                .frame(width: 4, height: 4)
+                .fill(vm.privacy == .clean
+                      ? Color.green.opacity(highContrast ? 1.0 : 0.85)
+                      : Color.orange)
+                .frame(width: highContrast ? 6 : 4, height: highContrast ? 6 : 4)
                 .padding(.leading, 13).padding(.bottom, 11)
                 .help(vm.privacy == .clean ? "On-device · 0 egress" : "Egress blocked — see log")
                 .accessibilityLabel("Privacy status")
+                .accessibilitySortPriority(Double(SurfaceUX.voiceOverSortPriority(for: .privacy)))
         }
     }
 
     /// Press-hold the surface is push-to-talk; release submits.
     private var holdToDictate: some Gesture {
-        LongPressGesture(minimumDuration: 0.35)
+        LongPressGesture(minimumDuration: SurfaceUX.PerceivedLatency.dictationHoldSeconds)
             .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .local))
             .onChanged { value in
                 if case .second = value, !dictation.isListening {

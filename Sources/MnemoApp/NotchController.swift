@@ -128,7 +128,8 @@ final class NotchController {
         // Only from a truly idle surface: never while a query is still
         // streaming (phase can be .answering mid-stream), or a hover-out/in
         // spawns a duplicate session on top of the in-flight one.
-        guard vm.state.phase == .idle, !vm.isQuerying else { return }
+        guard vm.state.phase == .idle,
+              !SurfaceUX.QueryLock.blocksResummon(isQuerying: vm.isQuerying, phase: vm.state.phase) else { return }
         vm.summon()
         panel.makeKeyAndOrderFront(nil)   // caret live immediately
     }
@@ -150,7 +151,9 @@ final class NotchController {
         // Also nil while a query streams (phase is .answering mid-stream): a
         // mouse-out must not tear down an in-flight answer, and leaving no idle
         // state to re-summon from is what stops the duplicate-session bug.
-        guard phase != .idle, phase != .searching, !dictation.isListening, !vm.isQuerying else { return nil }
+        guard phase != .idle,
+              !SurfaceUX.QueryLock.blocksDismissOnMouseOut(isQuerying: vm.isQuerying, phase: phase),
+              !dictation.isListening else { return nil }
         let width = (phase == .input ? Surface.inputWidth : Surface.readWidth) + 140
         let bodyHeight: CGFloat = phase == .input
             ? Surface.trayHeight
