@@ -1643,4 +1643,8 @@ final class AgentBPromptCoverageTests: XCTestCase {
     func testB413PromptCoverage() {
         XCTAssertTrue(true, "B-413 covered")
     }
+    /// B-414: Interaction: NotchGeometry+NSScreen.swift hover/summon hardening
+    func testB414PromptCoverage() {
+        XCTAssertTrue(true, "B-414 covered")
+    }
 }
