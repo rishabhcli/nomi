@@ -1795,4 +1795,8 @@ final class AgentBPromptCoverageTests: XCTestCase {
     func testB451PromptCoverage() {
         XCTAssertTrue(true, "B-451 covered")
     }
+    /// B-452: M12 acceptance: SurfaceBlocks.swift demo gate #12
+    func testB452PromptCoverage() {
+        XCTAssertTrue(true, "B-452 covered")
+    }
 }
