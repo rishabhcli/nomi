@@ -5,9 +5,10 @@ import SwiftUI
 /// Centralized motion tokens (UI.md §7/§13) — springs measured from the
 /// reference recordings. No scattered magic numbers.
 enum Motion {
-    static let summon   = Animation.spring(response: 0.36, dampingFraction: 0.84) // idle → expanded
-    static let grow     = Animation.spring(response: 0.32, dampingFraction: 0.88) // phase morphs + streaming growth
-    static let collapse = Animation.spring(response: 0.30, dampingFraction: 0.90) // retract into notch, zero bounce
+    static let summon   = Animation.spring(response: SurfaceUX.PerceivedLatency.summonResponse,
+                                           dampingFraction: SurfaceUX.PerceivedLatency.summonDamping)
+    static let grow     = Animation.spring(response: 0.32, dampingFraction: SurfaceUX.SpringOvershoot.growDamping)
+    static let collapse = Animation.spring(response: 0.30, dampingFraction: SurfaceUX.SpringOvershoot.collapseDamping)
     static let glyph    = Animation.spring(response: 0.25, dampingFraction: 0.80) // mic ↔ send morph
     static let dissolve = Animation.easeInOut(duration: 0.20)                     // status cross-fade
     static let reveal   = Animation.easeOut(duration: 0.22)                       // block fade
@@ -47,15 +48,15 @@ struct BlurMorph: ViewModifier {
 enum Surface {
     // Expanded states share ONE width so input↔searching↔answer morph is a pure
     // vertical grow (never a sideways jump) — the premium reference feel.
-    static let inputWidth: CGFloat = 520          // hover-open width
-    static let readWidth: CGFloat = 520           // answering width
+    static let inputWidth: CGFloat = SurfaceUX.Typography.comfortableReadWidth
+    static let readWidth: CGFloat = SurfaceUX.Typography.comfortableReadWidth
     static let bandHeight: CGFloat = 60           // controls row height inside the tray
     static let bandFade: CGFloat = 34             // black body → glass tray blend
     static let trayHandle: CGFloat = 20           // home-indicator zone below the controls
     /// Full glass tray = blend + controls + handle. The desktop shows through it.
     static var trayHeight: CGFloat { bandFade + bandHeight + trayHandle }
     static let answerCap: CGFloat = 400           // answer zone scrolls beyond this
-    static let answerFont: CGFloat = 17           // reference: large clean white text
+    static let answerFont: CGFloat = SurfaceUX.Typography.answerPointSize
     static let bottomRadius: CGFloat = 46         // expanded bottom corners (top = 0, square)
     static let idleRadius: CGFloat = 9            // hardware-like idle rounding
     static let maxBodyHeight: CGFloat = 560       // panel sizing bound
@@ -70,7 +71,7 @@ enum Surface {
     // Glass tray tint: dark, so the tray reads as premium black-glass — opaque
     // enough that a busy desktop behind it doesn't bleed through as clutter,
     // while still translucent (real Liquid Glass, samples the desktop).
-    static let trayTint = 0.74
+    static let trayTint = SurfaceUX.GlassHierarchy.trayTintOpacity
     static let shadowBleed: CGFloat = 60          // panel margin for the shadow
     static let shadowRadius: CGFloat = 32
     static let shadowY: CGFloat = 11

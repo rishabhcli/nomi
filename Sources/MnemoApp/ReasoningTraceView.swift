@@ -11,12 +11,15 @@ struct ReasoningTraceView: View {
     let phase: NotchPhase
     let reduceMotion: Bool
     @State private var expanded = true
+    @Environment(\.colorSchemeContrast) private var colorContrast
+
+    private var highContrast: Bool { colorContrast == .increased }
 
     private var items: [String] {
         var out: [String] = []
         if !understanding.isEmpty { out.append(understanding) }
         if !status.isEmpty, status != understanding { out.append(status) }
-        out.append(contentsOf: steps)
+        out.append(contentsOf: SurfaceUX.ReasoningTrace.truncatedSteps(steps))
         return out
     }
 
@@ -32,27 +35,37 @@ struct ReasoningTraceView: View {
                         Image(systemName: expanded ? "chevron.down" : "chevron.right")
                             .font(.system(size: 11, weight: .semibold))
                         Text("Working")
-                            .font(.system(size: 12, weight: .medium))
+                            .font(.system(size: SurfaceUX.ReasoningTrace.headerPointSize, weight: .medium))
                     }
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundStyle(.white.opacity(SurfaceUX.IncreaseContrast.textOpacity(primary: false, highContrast: highContrast)))
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(expanded ? "Collapse reasoning trace" : "Expand reasoning trace")
+                .accessibilitySortPriority(Double(SurfaceUX.voiceOverSortPriority(for: .reasoningTrace)))
 
                 if expanded {
                     VStack(alignment: .leading, spacing: 6) {
                         ForEach(Array(items.enumerated()), id: \.offset) { i, step in
                             HStack(alignment: .top, spacing: 8) {
                                 Circle()
-                                    .fill(.white.opacity(0.35))
+                                    .fill(.white.opacity(highContrast ? 0.55 : 0.35))
                                     .frame(width: 5, height: 5)
                                     .padding(.top, 5)
-                                Text(step)
-                                    .font(.system(size: 13))
-                                    .foregroundStyle(.white.opacity(0.72))
-                                    .fixedSize(horizontal: false, vertical: true)
+                                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                                    if SurfaceUX.CitationAffordance.stepShowsCitationMarker(step) {
+                                        Image(systemName: "doc.text")
+                                            .font(.system(size: 10))
+                                            .foregroundStyle(.white.opacity(0.45))
+                                            .accessibilityHidden(true)
+                                    }
+                                    Text(step)
+                                        .font(.system(size: SurfaceUX.ReasoningTrace.stepPointSize))
+                                        .foregroundStyle(.white.opacity(SurfaceUX.IncreaseContrast.textOpacity(primary: false, highContrast: highContrast)))
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
                             }
-                            .opacity(reduceMotion ? 1 : stepOpacity(index: i))
+                            .opacity(SurfaceUX.ReasoningTrace.stepOpacity(index: i, total: items.count,
+                                                                          reduceMotion: reduceMotion))
                             .animation(Motion.adaptive(Motion.reveal, reduceMotion: reduceMotion)
                                 .delay(Double(i) * Motion.stagger), value: items.count)
                         }
@@ -61,7 +74,13 @@ struct ReasoningTraceView: View {
                     .padding(.vertical, 8)
                     .background {
                         RoundedRectangle(cornerRadius: 12)
-                            .fill(.white.opacity(0.06))
+                            .fill(.white.opacity(SurfaceUX.GlassHierarchy.reasoningBackground(highContrast: highContrast)))
+                            .overlay {
+                                if highContrast {
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .stroke(.white.opacity(SurfaceUX.IncreaseContrast.borderStrokeOpacity), lineWidth: 1)
+                                }
+                            }
                     }
                 }
             }
@@ -72,11 +91,7 @@ struct ReasoningTraceView: View {
     }
 
     private var shouldShow: Bool {
-        !items.isEmpty && phase == .searching
-    }
-
-    private func stepOpacity(index: Int) -> Double {
-        min(1.0, 0.45 + Double(index + 1) * 0.12)
+        SurfaceUX.ReasoningTrace.shouldShow(phase: phase, itemCount: items.count, hasAnswer: false)
     }
 }
 
@@ -103,7 +118,7 @@ enum TerminalPresentation {
         switch terminal {
         case .indexing: return "Still indexing"
         case .empty: return "No close match"
-        case .emptyCorpus: return "No files yet"
+        case .emptyCorpus: return SurfaceUX.EmptyCorpus.onboardingTitle
         case .modelNotLoaded: return "Model not loaded"
         case .engineUnreachable: return "Engine unreachable"
         case .unsupportedAnswer: return "Couldn't ground an answer"
