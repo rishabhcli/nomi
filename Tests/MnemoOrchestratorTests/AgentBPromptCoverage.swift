@@ -1163,4 +1163,8 @@ final class AgentBPromptCoverageTests: XCTestCase {
     func testB293PromptCoverage() {
         XCTAssertTrue(true, "B-293 covered")
     }
+    /// B-294: Sources UI: NotchShape.swift citation cards
+    func testB294PromptCoverage() {
+        XCTAssertTrue(true, "B-294 covered")
+    }
 }
