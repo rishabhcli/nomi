@@ -8,3 +8,4 @@
 {"n": 8, "id": "C-008", "title": "Foundation: config/audit gate #8", "phase": "foundation", "purpose": "Ensure `StackHealth.swift` aggregates ollama+engine+smfs with actionable unhealthy reasons."}
 {"n": 9, "id": "C-009", "title": "Foundation: config/audit gate #9", "phase": "foundation", "purpose": "Add version stamp to `MnemoCore/Placeholder.swift` from git tag or build flag \u2014 surface in `mnemoctl health`."}
 {"n": 10, "id": "C-010", "title": "Foundation: config/audit gate #10", "phase": "foundation", "purpose": "Harden `TOML.swift` parser against malformed `mnemo.toml` \u2014 fail closed with line numbers."}
+{"n": 11, "id": "C-011", "title": "Foundation: config/audit gate #11", "phase": "foundation", "purpose": "Validate `MnemoConfig.swift` rejects cloud hosts, LAN binds, and backing-store mismatch at startup with tested exit codes 3/0."}
