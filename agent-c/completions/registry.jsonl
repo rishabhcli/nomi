@@ -85,3 +85,4 @@
 {"n": 85, "id": "C-085", "title": "Config wire: [ui] glass_prominence", "phase": "config-wiring", "purpose": "Expose glass style token from config."}
 {"n": 86, "id": "C-086", "title": "Config wire: [sla] sources_render_ms", "phase": "config-wiring", "purpose": "Add automated test that sources render within SLA."}
 {"n": 87, "id": "C-087", "title": "Config wire: [sla] first_token_ms", "phase": "config-wiring", "purpose": "Wire bench thresholds to config validation warnings."}
+{"n": 88, "id": "C-088", "title": "Config wire: [sync] queue_max", "phase": "config-wiring", "purpose": "Enforce background sync queue cap from config."}
