@@ -37,4 +37,9 @@ final class NotchReducerTests: XCTestCase {
         XCTAssertTrue(NotchSurfacePhaseBinding.shouldFocusInput(phase: .answering))
         XCTAssertFalse(NotchSurfacePhaseBinding.shouldFocusInput(phase: .searching))
     }
+    func testReasoningUI_routed_B241() {
+        var s = NotchState(phase: .searching, query: "q", answer: "", sources: [])
+        s = NotchReducer.apply(.routed(intent: "synthesis", effort: "medium"), to: s)
+        XCTAssertNotEqual(s.phase, .idle)
+    }
 }
