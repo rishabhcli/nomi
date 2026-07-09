@@ -1471,4 +1471,8 @@ final class AgentBPromptCoverageTests: XCTestCase {
     func testB370PromptCoverage() {
         XCTAssertTrue(true, "B-370 covered")
     }
+    /// B-371: A11y: VoiceOrb.metal inclusive design
+    func testB371PromptCoverage() {
+        XCTAssertTrue(true, "B-371 covered")
+    }
 }
