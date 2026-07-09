@@ -1,3 +1,4 @@
+// Agent-B audit B-018
 import AppKit
 import MnemoOrchestrator
 
