@@ -1,5 +1,6 @@
 // Agent-B audit B-009
 // Agent-B audit B-027
+import AppKit
 import AVFoundation
 import Foundation
 import MnemoOrchestrator
@@ -58,6 +59,10 @@ final class Dictation: ObservableObject {
             if s == session, let message { problem = message }
         }
 
+        // Agent apps (LSUIElement, non-activating) are never frontmost, so the
+        // system suppresses the mic/Speech TCC prompt and the request hangs
+        // forever. Activate briefly so the permission dialog can appear.
+        NSApplication.shared.activate(ignoringOtherApps: true)
         guard await Self.speechAuthorized() else {
             abort("Speech recognition is off. Enable it in System Settings → Privacy & Security."); return
         }
