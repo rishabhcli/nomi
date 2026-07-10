@@ -20,6 +20,7 @@ struct NotchSurfaceView: View {
 
     @FocusState private var focused: Bool
     @State private var answerHeight: CGFloat = 0   // measured once per content change
+    @State private var heldDictation = false       // push-to-talk started by a hold (vs a tap)
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var phase: NotchPhase { vm.state.phase }
@@ -68,11 +69,12 @@ struct NotchSurfaceView: View {
         .overlay(alignment: .bottomLeading) { privacyDot }
         .animation(Motion.adaptive(spring, reduceMotion: reduceMotion), value: geo)
         .contentShape(Rectangle())
-        .gesture(holdToDictate)
+        // Click the notch → voice: toggle on-device dictation (the listening
+        // orb). Click again while listening stops and submits. A press-hold is
+        // push-to-talk. Tap and long-press coexist cleanly here — unlike the old
+        // sequenced LongPress→Drag gesture, which swallowed the tap so a click
+        // did nothing. Hover still opens the auto-focused text field for typing.
         .onTapGesture {
-            // Click the notch → voice: start on-device dictation (the listening
-            // orb). Click again while listening stops and submits. Hovering the
-            // notch still opens the text field (auto-focused) for typing.
             if dictation.isListening {
                 dictation.stop()
                 if !vm.state.query.isEmpty { Task { await vm.submit() } }
@@ -80,6 +82,21 @@ struct NotchSurfaceView: View {
                 if vm.state.phase == .idle { vm.summon() }
                 dictation.start()
             }
+        }
+        .onLongPressGesture(minimumDuration: 0.35, maximumDistance: 50) {
+            guard !dictation.isListening else { return }
+            if vm.state.phase == .idle { vm.summon() }
+            dictation.start()
+            heldDictation = true
+        } onPressingChanged: { pressing in
+            guard !pressing else { return }
+            // Release ends push-to-talk — but only if a hold started it, so a
+            // quick tap's toggle isn't immediately cancelled by the release.
+            if heldDictation, dictation.isListening {
+                dictation.stop()
+                if !vm.state.query.isEmpty { Task { await vm.submit() } }
+            }
+            heldDictation = false
         }
         .background(shortcuts)
         .onExitCommand { NSApp.sendAction(#selector(AppDelegate.dismissNotch), to: nil, from: nil) }
@@ -152,23 +169,6 @@ struct NotchSurfaceView: View {
                 .help(vm.privacy == .clean ? "On-device · 0 egress" : "Egress blocked — see log")
                 .accessibilityLabel("Privacy status")
         }
-    }
-
-    /// Press-hold the surface is push-to-talk; release submits.
-    private var holdToDictate: some Gesture {
-        LongPressGesture(minimumDuration: 0.35)
-            .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .local))
-            .onChanged { value in
-                if case .second = value, !dictation.isListening {
-                    if vm.state.phase == .idle { vm.summon() }
-                    dictation.start()
-                }
-            }
-            .onEnded { _ in
-                guard dictation.isListening else { return }
-                dictation.stop()
-                if !vm.state.query.isEmpty { Task { await vm.submit() } }
-            }
     }
 
     private var shortcuts: some View {

@@ -28,12 +28,14 @@ public enum NotchShapeGeometry {
 
 /// Hover arming + mouse-out collapse: pure decisions for the detector (UI.md §5).
 public enum NotchHover {
-    /// Cursor within `hoverZonePx` of the top edge AND horizontally over the
-    /// notch region arms the surface.
+    /// Arms ONLY when the cursor is touching the very top edge of the screen
+    /// (within `hoverZonePx`) AND horizontally over the notch region — not
+    /// merely near the top. Throwing the cursor to the top summons; brushing
+    /// below the top edge does not.
     public static func isArmed(cursor: CGPoint, notchRect: CGRect, screenFrame: CGRect, hoverZonePx: CGFloat) -> Bool {
-        let nearTop = cursor.y >= screenFrame.maxY - notchRect.height - hoverZonePx
+        let atVeryTop = cursor.y >= screenFrame.maxY - hoverZonePx
         let overNotch = cursor.x >= notchRect.minX - hoverZonePx && cursor.x <= notchRect.maxX + hoverZonePx
-        return nearTop && overNotch
+        return atVeryTop && overNotch
     }
 
     /// Mouse-out collapse (UI.md §5F): true when the cursor is fully outside
