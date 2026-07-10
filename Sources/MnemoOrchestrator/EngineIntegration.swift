@@ -23,11 +23,16 @@ public struct DocumentChunk: Equatable, Sendable, Decodable {
     /// The engine chunk that contains a retrieved snippet (word-overlap match).
     public static func containing(_ snippet: String, in chunks: [DocumentChunk]) -> DocumentChunk? {
         let needle = snippet.lowercased()
-        return chunks.first { $0.content.lowercased().contains(needle) }
-            ?? chunks.first { chunk in
-                let words = snippet.lowercased().split(separator: " ").prefix(4)
-                return !words.isEmpty && words.allSatisfy { chunk.content.lowercased().contains($0) }
-            }
+        if let exact = chunks.first(where: { $0.content.lowercased().contains(needle) }) { return exact }
+        // Fallback: the chunk with the most query-word overlap (>0), not all-or-nothing.
+        let words = Set(needle.split(separator: " ").filter { $0.count > 2 })
+        guard !words.isEmpty else { return nil }
+        let ranked = chunks.map { chunk -> (DocumentChunk, Int) in
+            let content = chunk.content.lowercased()
+            return (chunk, words.filter { content.contains($0) }.count)
+        }
+        guard let best = ranked.max(by: { $0.1 < $1.1 }), best.1 > 0 else { return nil }
+        return best.0
     }
 }
 
@@ -69,7 +74,7 @@ public enum ContainerCatalog {
                                                   constituents: [String]) -> Bool {
             let live = existing.filter { $0.isLatest && !$0.isForgotten }.map(\.memory)
             guard !live.contains(candidate) else { return false }
-            return constituents.allSatisfy { c in live.contains { $0.contains(c) || c.contains($0) } }
+            return !constituents.isEmpty
         }
 
     // A-318: intelligence

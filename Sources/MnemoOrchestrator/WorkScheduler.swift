@@ -102,6 +102,23 @@ public enum SchedulingBudget: Sendable {
     private static let lock = NSLock()
     nonisolated(unsafe) private static var budgets: [String: UInt64] = [:]
 
+    /// One-time registration of every background component's budget. Runs on
+    /// first query of the registry so scheduling decisions always see the full
+    /// set (each component's budget is a static constant — registration is
+    /// idempotent).
+    private static let ensureDefaults: Void = {
+        CommandParser.Scheduling.registerBudget()
+        Confidence.Scheduling.registerBudget()
+        Digest.Scheduling.registerBudget()
+        EntityExtractor.Scheduling.registerBudget()
+        FollowUpSuggester.Scheduling.registerBudget()
+        LocalExtractor.Scheduling.registerBudget()
+        MediaCompanion.Scheduling.registerBudget()
+        Preferences.Scheduling.registerBudget()
+        Provenance.Scheduling.registerBudget()
+        ResponseStyle.Scheduling.registerBudget()
+    }()
+
     public static func register(_ component: String, budgetUs: UInt64) {
         lock.lock(); defer { lock.unlock() }
         budgets[component] = budgetUs
@@ -113,11 +130,13 @@ public enum SchedulingBudget: Sendable {
     }
 
     public static func registeredComponents() -> [String] {
+        _ = ensureDefaults
         lock.lock(); defer { lock.unlock() }
         return budgets.keys.sorted()
     }
 
     public static func totalRegisteredUs() -> UInt64 {
+        _ = ensureDefaults
         lock.lock(); defer { lock.unlock() }
         return budgets.values.reduce(0, +)
     }

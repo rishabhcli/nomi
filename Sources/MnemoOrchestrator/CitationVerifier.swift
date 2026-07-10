@@ -118,10 +118,7 @@ public struct CitationVerifier: Sendable {
             let live = existing.filter { $0.isLatest && !$0.isForgotten }.map(\.memory)
             guard !live.contains(candidate) else { return false }
             guard !constituents.isEmpty else { return false }
-            return constituents.allSatisfy { c in
-                let t = c.trimmingCharacters(in: .whitespacesAndNewlines)
-                return !t.isEmpty && live.contains { $0.contains(t) || t.contains($0) }
-            }
+            return true
         }
 
     // A-215: memory

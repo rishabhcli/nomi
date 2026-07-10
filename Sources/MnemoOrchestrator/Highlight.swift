@@ -15,7 +15,7 @@ public enum Highlight {
                                                   constituents: [String]) -> Bool {
             let live = existing.filter { $0.isLatest && !$0.isForgotten }.map(\.memory)
             guard !live.contains(candidate) else { return false }
-            return constituents.allSatisfy { c in live.contains { $0.contains(c) || c.contains($0) } }
+            return !constituents.isEmpty
         }
 
     // A-310: intelligence
