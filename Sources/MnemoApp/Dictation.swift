@@ -41,9 +41,19 @@ final class Dictation: ObservableObject {
     private var tapInstalled = false
     private var session = 0                    // bumped on every start()/stop()
 
+    /// Silence-based endpointing: once speech is followed by ~silenceWindow of
+    /// quiet, fire `onEndpoint` so the surface auto-stops and starts searching
+    /// (no tap needed). Fires at most once per utterance.
+    var onEndpoint: (@MainActor () -> Void)?
+    private var heardSpeech = false
+    private var lastLoud = Date()
+    private let speechLevel = 0.12             // smoothed amplitude above this = speech
+    private let silenceWindow: TimeInterval = 1.2
+
     func start() {
         guard !isListening, startTask == nil else { return }
         problem = nil
+        heardSpeech = false
         session &+= 1
         let mine = session
         startTask = Task { [weak self] in
@@ -231,6 +241,14 @@ final class Dictation: ObservableObject {
             guard self.isListening else { return }   // don't revive the orb after stop()
             let target = self.envelope.normalize(rms: rms)
             self.amplitude = self.envelope.follow(target: target)
+            // Endpoint on silence: speech, then a quiet gap → auto-stop + search.
+            if self.amplitude >= self.speechLevel {
+                self.heardSpeech = true
+                self.lastLoud = Date()
+            } else if self.heardSpeech, Date().timeIntervalSince(self.lastLoud) >= self.silenceWindow {
+                self.heardSpeech = false
+                self.onEndpoint?()
+            }
         }
     }
 }

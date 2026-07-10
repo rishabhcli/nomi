@@ -119,6 +119,15 @@ final class NotchController {
         // summon is purely a content morph, never a window pop-in.
         hosting.layoutSubtreeIfNeeded()
         panel.orderFrontRegardless()
+
+        // Voice endpointing: when the user stops speaking, auto-stop the mic and
+        // submit what was transcribed — no tap needed. The surface goes straight
+        // to searching with the transcript shown above the spinner.
+        dictation.onEndpoint = { [weak self] in
+            guard let self else { return }
+            self.dictation.stop()
+            if !self.vm.state.query.isEmpty { Task { await self.vm.submit() } }
+        }
     }
 
     func summon() {

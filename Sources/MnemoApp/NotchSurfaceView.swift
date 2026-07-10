@@ -145,7 +145,28 @@ struct NotchSurfaceView: View {
             answerZone
                 .frame(maxWidth: .infinity, alignment: .top)
                 .transition(Motion.blurMorph(reduceMotion: reduceMotion))
+        } else if phase == .searching {
+            searchingHeader
+                .transition(Motion.blurMorph(reduceMotion: reduceMotion))
         }
+    }
+
+    /// During search, show what the user asked (spoken or typed) above the tray
+    /// spinner — so "heard you → searching" is observable, not a blind spinner.
+    private var searchingHeader: some View {
+        VStack(spacing: 5) {
+            Text(vm.state.query.isEmpty ? "…" : "\u{201C}\(vm.state.query)\u{201D}")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(.white)
+                .multilineTextAlignment(.center)
+                .lineLimit(3)
+                .padding(.horizontal, 22)
+            Text("Searching your memory…")
+                .font(.system(size: 11))
+                .foregroundStyle(.white.opacity(0.5))
+        }
+        .frame(maxWidth: .infinity, alignment: .center)
+        .padding(.top, 6)
     }
 
     /// Answer area (reference): white text, one quiet source chip row, outline
