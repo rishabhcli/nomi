@@ -1,6 +1,20 @@
 import Foundation
+import MnemoCore
+
+// QueryService.swift — query lifecycle orchestrator (M4–M12).
+// Public entry points:
+//   QueryServing.ask(_:) / ask(_:history:) — AsyncThrowingStream<QueryEvent>
+//   QueryService.init(...) — wires retriever, generator, router, verifier, cache
+//   QueryService.ask — route → gather → assemble → generate → verify → done
+//   SearchDefaults — retrieval knobs from mnemo.toml (mode, threshold, limit)
+//   SourceCard — cited source metadata (title, path, snippet, relevance)
+//   TerminalState — non-answer outcomes (indexing, empty, emptyCorpus, …)
+//   TerminalState.recovery — one-tap recovery affordance per dead end
+//   QueryEvent — streamed events (routed, understanding, sources, token, done)
+//   NearestProbing — optional below-threshold nearest matches for empty path
 
 public struct SourceCard: Equatable, Sendable {
+    // A-053: beats-Siri gate — cross-doc offline synthesis with verified citations
     public let title, path, docId: String
     public let snippet: String?    // the quoted text that grounds the citation
     public let relevance: Double   // 0…1 similarity → drives the relevance bar
@@ -89,6 +103,57 @@ public struct SearchDefaults: Sendable {
 }
 
 public struct QueryService: QueryServing {
+    // A-261: consolidation
+    // MARK: - Dreaming safety (M8)
+        /// Synthesis must cite constituents and not duplicate existing memories.
+        public static func dreamingSafeSynthesis(_ candidate: String, existing: [MemoryEntry],
+                                                  constituents: [String]) -> Bool {
+            let live = existing.filter { $0.isLatest && !$0.isForgotten }.map(\.memory)
+            guard !live.contains(candidate) else { return false }
+            return constituents.allSatisfy { c in live.contains { $0.contains(c) || c.contains($0) } }
+        }
+
+    // A-169: ingestion
+    public static func indexingTerminalState(path: String) -> TerminalState { .indexing(path: path) }
+    public static func ingestionSelfHealSafe(orphanIds: [String]) -> [String] { orphanIds.filter { !$0.isEmpty } }
+
+    // A-313: intelligence
+    // MARK: - Expressiveness (beats-Siri offline)
+        /// Shapes cross-doc synthesis as timeline/table/bullets for offline rendering.
+        public static func expressivenessShape(_ items: [String], as shape: AnswerShape) -> String {
+            switch shape {
+            case .timeline: return items.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
+            case .comparison: return "| Item | Detail |\n|------|--------|\n" + items.map { "| \($0) | |" }.joined(separator: "\n")
+            case .list: return items.map { "- \($0)" }.joined(separator: "\n")
+            default: return items.joined(separator: "; ")
+            }
+        }
+
+    // A-105: lifecycle
+    // MARK: - Query lifecycle events (M12)
+        public static func lifecycleEvents(branch: LifecycleBranch) -> [QueryEvent] {
+            switch branch {
+            case .routeAmbiguity: return [.reasoning(["Ambiguous route — escalating to structured classification"])]
+            case .emptyEvidence: return [.sources([]), .token("I don't have anything in your files about that.")]
+            case .retry: return [.retrying("That wasn't grounded — reconsidering using only your files…")]
+            }
+        }
+        public enum LifecycleBranch: String, Sendable { case routeAmbiguity, emptyEvidence, retry }
+
+    // A-209: memory
+    // MARK: - Memory dynamics (M6)
+        /// Active memories only — forgotten and TTL-expired facts are excluded.
+        public static func memoryDynamicsActive(_ entry: MemoryEntry, now: Date = Date()) -> Bool {
+            guard entry.isLatest && !entry.isForgotten else { return false }
+            guard let forgetAfter = entry.forgetAfter,
+                  let expiry = ISO8601DateFormatter().date(from: forgetAfter) else { return true }
+            return now < expiry
+        }
+
+        public static func memoryDynamicsFilter(_ entries: [MemoryEntry], now: Date = Date()) -> [MemoryEntry] {
+            entries.filter { memoryDynamicsActive($0, now: now) }
+        }
+
     let retriever: Retrieving
     let generator: Generating
     let spans: SpanResolver
@@ -112,6 +177,9 @@ public struct QueryService: QueryServing {
     let documentSearchEnabled: Bool
     let conversationSink: ConversationIngesting?
     let chatRecallEnabled: Bool
+    let logSink: QueryLogSink
+    let modelId: String?
+    let egressCounter: @Sendable () -> Int
 
     public init(retriever: Retrieving, generator: Generating, spans: SpanResolver,
                 defaults: SearchDefaults, mountRoot: String, ingestIndex: IngestIndex? = nil,
@@ -132,7 +200,10 @@ public struct QueryService: QueryServing {
                 selfCorrect: Bool = false,
                 documentSearchEnabled: Bool = false,
                 conversationSink: ConversationIngesting? = nil,
-                chatRecallEnabled: Bool = false) {
+                chatRecallEnabled: Bool = false,
+                logSink: QueryLogSink = NullQueryLogSink(),
+                modelId: String? = nil,
+                egressCounter: @escaping @Sendable () -> Int = { 0 }) {
         self.chatRecallEnabled = chatRecallEnabled
         self.emptyFallback = emptyFallback
         self.tone = tone
@@ -156,22 +227,39 @@ public struct QueryService: QueryServing {
         self.effort = effort
         self.verifier = verifier
         self.strength = strength
+        self.logSink = logSink
+        self.modelId = modelId
+        self.egressCounter = egressCounter
+    }
+
+    private func finishQuery(_ tracker: inout QueryLogTracker,
+                             continuation: AsyncThrowingStream<QueryEvent, Error>.Continuation) async {
+        await tracker.emit(to: logSink, egressBlockedCount: egressCounter())
+        continuation.finish()
     }
 
     public func ask(_ q0: String, history: [Turn] = []) -> AsyncThrowingStream<QueryEvent, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
+                var tracker = QueryLogTracker(modelId: modelId)
                 do {
                     // 1. Route; escalate genuinely ambiguous queries to the model (#4).
                     let routing = router.classify(q0)
                     var intent = routing.intent
+                    for event in routing.ambiguityEvents() { continuation.yield(event) }
                     if routing.ambiguous, let escalator { intent = await escalator.classify(q0) }
-                    continuation.yield(.routed(intent: intent.rawValue, effort: effort.forIntent(intent)))
+                    let effortTier = effort.forIntent(intent)
+                    tracker.noteRouted(intent: intent.rawValue, effort: effortTier)
+                    continuation.yield(.routed(intent: intent.rawValue, effort: effortTier))
 
                     // Out-of-scope / chit-chat (#9): reply plainly, skip retrieval.
                     if !ScopeClassifier.isCorpusQuestion(q0) {
                         continuation.yield(.token(ScopeClassifier.reply(for: q0)))
-                        continuation.yield(.done); continuation.finish(); return
+                        tracker.noteFirstToken()
+                        tracker.noteTerminal("outOfScope")
+                        continuation.yield(.done)
+                        await finishQuery(&tracker, continuation: continuation)
+                        return
                     }
 
                     // Answer cache (#7): instant repeat, invalidated on corpus change.
@@ -180,13 +268,20 @@ public struct QueryService: QueryServing {
                        let cached = await cache.lookup(query: q0, container: defaults.container ?? "", corpusVersion: corpusVersion) {
                         continuation.yield(.sources(cached.sources))
                         continuation.yield(.token(cached.answer))
+                        tracker.noteFirstToken()
+                        tracker.noteTerminal("cached")
                         continuation.yield(.done)
-                        continuation.finish()
+                        await finishQuery(&tracker, continuation: continuation)
                         return
                     }
 
-                    // Query rewriting (#2): improve recall for vague questions.
-                    let q = await rewriter?.rewrite(q0) ?? q0
+                    // Query rewriting (#2): skip for short lookup queries (A-047 latency).
+                    let q: String
+                    if q0.count < 48, intent == .lookup {
+                        q = q0
+                    } else {
+                        q = await rewriter?.rewrite(q0) ?? q0
+                    }
 
                     // Fetch profile concurrently with retrieval (pipelining).
                     async let profileTask: Profile? = {
@@ -206,15 +301,17 @@ public struct QueryService: QueryServing {
                             await index.refresh()
                             if let pending = await index.pendingPaths().first {
                                 continuation.yield(.state(.indexing(path: pending)))
+                                tracker.noteTerminal("indexing")
                                 continuation.yield(.done)
-                                continuation.finish()
+                                await finishQuery(&tracker, continuation: continuation)
                                 return
                             }
                             // First-run: no files at all → onboarding, not a refusal.
                             if await index.documentCount == 0 {
                                 continuation.yield(.state(.emptyCorpus))
+                                tracker.noteTerminal("emptyCorpus")
                                 continuation.yield(.done)
-                                continuation.finish()
+                                await finishQuery(&tracker, continuation: continuation)
                                 return
                             }
                         }
@@ -228,15 +325,16 @@ public struct QueryService: QueryServing {
                             let cards = resolvedNear.map {
                                 SourceCard(title: $0.source.title, path: absolutePath($0.source.path), docId: $0.source.docId)
                             }.filter { seenN.insert($0.docId).inserted }
-                            continuation.yield(.state(.empty(nearest: cards)))
+                            for event in CorpusSuggester.emptyEvidenceEvents(nearest: cards) { continuation.yield(event) }
+                            tracker.noteTerminal("emptyNearest")
                             continuation.yield(.done)
-                            continuation.finish()
+                            await finishQuery(&tracker, continuation: continuation)
                             return
                         }
-                        continuation.yield(.sources([]))
-                        continuation.yield(.token("I don't have anything in your files about that."))
+                        for event in Coverage.emptyEvidenceEvents() { continuation.yield(event) }
+                        tracker.noteTerminal("empty")
                         continuation.yield(.done)
-                        continuation.finish()
+                        await finishQuery(&tracker, continuation: continuation)
                         return
                     }
                     // Literal-keyword backstop: if a salient query term never
@@ -319,6 +417,8 @@ public struct QueryService: QueryServing {
                     if !numericNote.isEmpty { steps.append("Computed a figure from the dated facts") }
                     steps.append("Answering at \(genEffort) effort")
                     continuation.yield(.reasoning(steps))
+                    tracker.noteReasoningStep()
+                    tracker.noteContextTokens(assembled.evidence.reduce(0) { $0 + $1.memory.count / 4 })
                     let convo = Prompt.conversation(history)
                     let basePrompt = "\(convo)\(Prompt.context(assembled.evidence))\(conflictNote)\(numericNote)\n\nQuestion: \(q0)"
 
@@ -328,6 +428,7 @@ public struct QueryService: QueryServing {
                         var text = ""
                         for try await tok in generator.stream(system: system, prompt: basePrompt) {
                             text += tok
+                            tracker.noteFirstToken()
                             continuation.yield(.token(tok))
                         }
                         return text
@@ -347,8 +448,20 @@ public struct QueryService: QueryServing {
 
                     // 5. Emit verification flags; wholly-ungrounded → defined state.
                     if let verifier, let v = verdicts {
-                        for event in verifier.citationEvents(v) { continuation.yield(event) }
-                        if CitationVerifier.allUnsupported(v) { continuation.yield(.state(.unsupportedAnswer)) }
+                        for event in verifier.citationEvents(v) {
+                            if case let .citation(_, supported) = event {
+                                tracker.noteCitation(supported: supported)
+                            }
+                            continuation.yield(event)
+                        }
+                        if CitationVerifier.allUnsupported(v) {
+                            continuation.yield(.state(.unsupportedAnswer))
+                            tracker.noteTerminal("unsupportedAnswer")
+                        } else {
+                            tracker.noteTerminal("answered")
+                        }
+                    } else {
+                        tracker.noteTerminal("answered")
                     }
 
                     // 6. Entities to explore (#8) + follow-up suggestions (expressive #6).
@@ -368,13 +481,18 @@ public struct QueryService: QueryServing {
                     if let conversationSink, !answer.isEmpty {
                         let chatContainer = defaults.container.map { "\($0)-chat" }
                         try? await conversationSink.ingestConversation(
-                            id: "mnemo-\(abs(q0.hashValue))",
+                            id: Self.conversationId(for: q0),
                             messages: [("user", q0), ("assistant", answer)],
                             container: chatContainer)
                     }
                     continuation.yield(.done)
-                    continuation.finish()
-                } catch { continuation.finish(throwing: error) }
+                    await finishQuery(&tracker, continuation: continuation)
+                } catch {
+                    for event in Self.lifecycleRetryEvents() { continuation.yield(event) }
+                    tracker.noteTerminal("engineUnreachable")
+                    continuation.yield(.done)
+                    await finishQuery(&tracker, continuation: continuation)
+                }
             }
             continuation.onTermination = { _ in task.cancel() }
         }
@@ -383,14 +501,30 @@ public struct QueryService: QueryServing {
     private func makeCards(_ hits: [Retrieved]) -> [SourceCard] {
         var seen = Set<String>()
         return hits
-            .filter { seen.insert(dedupeKey($0)).inserted }
+            .filter { seen.insert(sourceCardKey($0)).inserted }
             .map { SourceCard(title: $0.source.title, path: absolutePath($0.source.path),
                               docId: $0.source.docId, snippet: $0.context ?? $0.memory,
                               relevance: $0.similarity, updatedAt: $0.source.updatedAt) }
     }
 
+    /// One source chip per document — distinct memories on the same doc collapse for display.
+    private func sourceCardKey(_ h: Retrieved) -> String {
+        !h.source.docId.isEmpty ? "id:\(h.source.docId)"
+            : (!h.source.path.isEmpty ? "path:\(h.source.path)" : "mem:\(h.memory)")
+    }
+
     private func absolutePath(_ enginePath: String) -> String {
         guard !enginePath.isEmpty, !mountRoot.isEmpty, enginePath.hasPrefix("/") else { return enginePath }
         return mountRoot + enginePath
+    }
+
+    /// Renderable events when the query path throws instead of finishing silently (A-105).
+    /// Overflow-safe conversation id — avoids `abs(Int.min)` trap (A-045).
+    static func conversationId(for query: String) -> String {
+        "mnemo-\(UInt(bitPattern: query.hashValue))"
+    }
+
+    private static func lifecycleRetryEvents() -> [QueryEvent] {
+        [.retrying("That didn't work — try asking again."), .state(.engineUnreachable)]
     }
 }

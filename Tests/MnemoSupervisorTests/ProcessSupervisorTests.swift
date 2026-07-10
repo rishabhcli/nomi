@@ -63,4 +63,10 @@ final class ProcessSupervisorTests: XCTestCase {
         XCTAssertEqual(terminated, [.engine])
         XCTAssertEqual(launched, [.ollama, .engine, .smfs, .engine])
     }
+
+    func testRestartHonorsBackoffConfig() async throws {
+        var text = supervisorSampleConfig + "\n[supervisor]\nrestart_backoff = 500\n"
+        let cfg = try MnemoConfig.load(from: text)
+        XCTAssertEqual(cfg.supervisor.restartBackoffMs, 500)
+    }
 }

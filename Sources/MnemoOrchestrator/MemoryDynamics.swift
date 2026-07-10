@@ -1,13 +1,17 @@
 import Foundation
 
-/// A prior version of a memory (audit trail).
+// MemoryDynamics.swift — memory versioning, supersession, contradiction (M6).
+// Public types: MemoryVersion, MemoryEntry, MemoryStoring, ContradictionDetecting,
+//   MemoryDynamics, LexicalContradiction — serve M6 memory dynamics milestone.
+
+/// A prior version of a memory (audit trail). M6.
 public struct MemoryVersion: Equatable, Sendable, Decodable {
     public let memory: String
     public let version: Int
     public init(memory: String, version: Int) { self.memory = memory; self.version = version }
 }
 
-/// The engine's memory-entry shape (subset), including its version chain.
+/// The engine's memory-entry shape (subset), including its version chain. M6.
 public struct MemoryEntry: Equatable, Sendable, Decodable {
     public let id: String
     public let memory: String
@@ -81,6 +85,46 @@ public protocol ContradictionDetecting: Sendable {
 /// supersedes its predecessor in place instead of accumulating; novel facts
 /// are created; retirement is a soft-delete with an audited reason.
 public struct MemoryDynamics: Sendable {
+    // A-332: latency
+    // MARK: - Scheduling (M11)
+        /// Interactive queries preempt utility background work at chunk boundaries.
+        public static func schedulingYieldHint(priority: WorkPriority = .background) -> Bool {
+            priority < .interactive
+        }
+
+    // A-188: ingestion
+    public static func indexingTerminalState(path: String) -> TerminalState { .indexing(path: path) }
+    public static func ingestionSelfHealSafe(orphanIds: [String]) -> [String] { orphanIds.filter { !$0.isEmpty } }
+
+    // A-176: ingestion
+    // MARK: - Ingestion reliability (M2)
+        public static func indexingTerminalState(path: String) -> TerminalState { .indexing(path: path) }
+        public static func ingestionSelfHealSafe(orphanIds: [String]) -> [String] { orphanIds.filter { !$0.isEmpty } }
+
+    // A-280: consolidation
+    // MARK: - Dreaming safety (M8)
+        /// Synthesis must cite constituents and not duplicate existing memories.
+        public static func dreamingSafeSynthesis(_ candidate: String, existing: [MemoryEntry],
+                                                  constituents: [String]) -> Bool {
+            let live = existing.filter { $0.isLatest && !$0.isForgotten }.map(\.memory)
+            guard !live.contains(candidate) else { return false }
+            return constituents.allSatisfy { c in live.contains { $0.contains(c) || c.contains($0) } }
+        }
+
+    // A-228: memory
+    // MARK: - Memory dynamics (M6)
+        /// Active memories only — forgotten and TTL-expired facts are excluded.
+        public static func memoryDynamicsActive(_ entry: MemoryEntry, now: Date = Date()) -> Bool {
+            guard entry.isLatest && !entry.isForgotten else { return false }
+            guard let forgetAfter = entry.forgetAfter,
+                  let expiry = ISO8601DateFormatter().date(from: forgetAfter) else { return true }
+            return now < expiry
+        }
+
+        public static func memoryDynamicsFilter(_ entries: [MemoryEntry], now: Date = Date()) -> [MemoryEntry] {
+            entries.filter { memoryDynamicsActive($0, now: now) }
+        }
+
     let store: MemoryStoring
     let container: String?
     let detector: ContradictionDetecting
@@ -119,6 +163,30 @@ public struct MemoryDynamics: Sendable {
     }
 }
 
+
+/// Filters memories for active use: not forgotten, not TTL-expired, latest version.
+public enum MemoryFactFilter {
+    private static let iso = ISO8601DateFormatter()
+
+    public static func isActive(_ e: MemoryEntry, now: Date = Date()) -> Bool {
+        guard e.isLatest && !e.isForgotten else { return false }
+        guard let forgetAfter = e.forgetAfter,
+              let expiry = iso.date(from: forgetAfter) else { return true }
+        return now < expiry
+    }
+
+    public static func filterActive(_ entries: [MemoryEntry], now: Date = Date()) -> [MemoryEntry] {
+        entries.filter { isActive($0, now: now) }
+    }
+
+    public static func filterProfile(_ profile: Profile, activeTexts: Set<String>) -> Profile {
+        Profile(
+            statics: profile.statics.filter { activeTexts.contains($0) },
+            dynamics: profile.dynamics.filter { activeTexts.contains($0) },
+            memories: profile.memories.filter { activeTexts.contains($0.memory) })
+    }
+}
+
 /// Heuristic contradiction detector: same subject + predicate, different
 /// object → supersede. Deterministic; the LLM detector handles paraphrase.
 public struct LexicalContradiction: ContradictionDetecting {
@@ -126,11 +194,16 @@ public struct LexicalContradiction: ContradictionDetecting {
 
     struct SPO { let subject: String; let predicate: String; let object: String }
 
-    static let predicates = ["live in", "living in", "moved to", "work at", "work in",
-                             "based in", "located in", "reside in"]
+    static let predicates = ["prefers", "favorite", "favourite", "likes", "live in", "living in", "moved to", "work at", "work in",
+                             "based in", "located in", "reside in",
+                             "started on", "ended on", "married to", "reports to", "manages",
+                             "costs", "worth", "salary of", "earns"]
     static let predicateGroups: [[String]] = [
         ["live in", "living in", "moved to", "reside in", "based in", "located in"],
         ["work at", "work in", "employed at"],
+        ["started on", "began on", "ended on", "finished on"],
+        ["married to", "reports to", "manages"],
+        ["costs", "worth", "salary of", "earns"],
     ]
 
     static func parse(_ s: String) -> SPO? {

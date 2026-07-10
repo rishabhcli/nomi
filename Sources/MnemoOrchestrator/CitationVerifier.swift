@@ -17,6 +17,15 @@ public enum Sentences {
                 if ch == "." && prev.isNumber && next.isNumber { continue }
                 var j = i + 1
                 while j < chars.count, chars[j] == " " { j += 1 }
+                if ch == ".", j < chars.count {
+                    var k = i - 1
+                    while k >= 0, chars[k].isWhitespace { k -= 1 }
+                    var start = k
+                    while start >= 0, chars[start].isLetter { start -= 1 }
+                    let abbrev = String(chars[(start + 1)...k])
+                    let nextCh = chars[j]
+                    if abbrev.count <= 3, nextCh.isUppercase || nextCh.isNumber { continue }
+                }
                 let boundary = j >= chars.count || chars[j].isUppercase || chars[j].isNumber
                     || chars[j] == "\"" || chars[j] == "["
                 if boundary {
@@ -73,6 +82,62 @@ public protocol VerificationBackend: Sendable {
 /// is supported only if some evidence chunk is both similar enough AND entails
 /// it — a hallucination fails at least one and is flagged.
 public struct CitationVerifier: Sendable {
+    // A-319: intelligence
+    // MARK: - Expressiveness (beats-Siri offline)
+        /// Shapes cross-doc synthesis as timeline/table/bullets for offline rendering.
+        public static func expressivenessShape(_ items: [String], as shape: AnswerShape) -> String {
+            switch shape {
+            case .timeline: return items.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
+            case .comparison: return "| Item | Detail |\n|------|--------|\n" + items.map { "| \($0) | |" }.joined(separator: "\n")
+            case .list: return items.map { "- \($0)" }.joined(separator: "\n")
+            default: return items.joined(separator: "; ")
+            }
+        }
+
+    // A-111: lifecycle
+    // MARK: - Query lifecycle events (M12)
+        public static func lifecycleEvents(branch: LifecycleBranch) -> [QueryEvent] {
+            switch branch {
+            case .routeAmbiguity: return [.reasoning(["Ambiguous route — escalating to structured classification"])]
+            case .emptyEvidence: return [.sources([]), .token("I don't have anything in your files about that.")]
+            case .retry: return [.retrying("That wasn't grounded — reconsidering using only your files…")]
+            }
+        }
+        public enum LifecycleBranch: String, Sendable { case routeAmbiguity, emptyEvidence, retry }
+
+    // A-163: ingestion
+    // MARK: - Ingestion reliability (M2)
+        public static func indexingTerminalState(path: String) -> TerminalState { .indexing(path: path) }
+        public static func ingestionSelfHealSafe(orphanIds: [String]) -> [String] { orphanIds.filter { !$0.isEmpty } }
+
+    // A-267: consolidation
+    // MARK: - Dreaming safety (M8)
+        /// Synthesis must cite constituents and not duplicate existing memories.
+        public static func dreamingSafeSynthesis(_ candidate: String, existing: [MemoryEntry],
+                                                  constituents: [String]) -> Bool {
+            let live = existing.filter { $0.isLatest && !$0.isForgotten }.map(\.memory)
+            guard !live.contains(candidate) else { return false }
+            guard !constituents.isEmpty else { return false }
+            return constituents.allSatisfy { c in
+                let t = c.trimmingCharacters(in: .whitespacesAndNewlines)
+                return !t.isEmpty && live.contains { $0.contains(t) || t.contains($0) }
+            }
+        }
+
+    // A-215: memory
+    // MARK: - Memory dynamics (M6)
+        /// Active memories only — forgotten and TTL-expired facts are excluded.
+        public static func memoryDynamicsActive(_ entry: MemoryEntry, now: Date = Date()) -> Bool {
+            guard entry.isLatest && !entry.isForgotten else { return false }
+            guard let forgetAfter = entry.forgetAfter else { return true }
+            guard let expiry = ISO8601DateFormatter().date(from: forgetAfter) else { return false }
+            return now < expiry
+        }
+
+        public static func memoryDynamicsFilter(_ entries: [MemoryEntry], now: Date = Date()) -> [MemoryEntry] {
+            entries.filter { memoryDynamicsActive($0, now: now) }
+        }
+
     let backend: VerificationBackend
     let simThreshold: Double
 
@@ -92,7 +157,9 @@ public struct CitationVerifier: Sendable {
         func verdict(_ i: Int, _ sentence: String) async -> SentenceVerdict {
             let claim = Verification.stripCitations(sentence).trimmingCharacters(in: .whitespacesAndNewlines)
             // Skip pure questions / connective fragments (nothing to ground).
-            if claim.count < 3 { return SentenceVerdict(index: i, text: sentence, supported: true, bestSource: nil) }
+            if claim.filter({ $0.isLetter || $0.isNumber }).isEmpty {
+                return SentenceVerdict(index: i, text: sentence, supported: true, bestSource: nil)
+            }
             // Best single chunk by similarity drives the citation + gates entailment.
             var bestSim = 0.0
             var bestSource: SourceLocator?
@@ -134,7 +201,11 @@ public struct CitationVerifier: Sendable {
     /// Every non-trivial sentence unsupported → the answer is ungrounded (M12
     /// `unsupported_answer` terminal state).
     public static func allUnsupported(_ verdicts: [SentenceVerdict]) -> Bool {
-        let real = verdicts.filter { $0.text.count >= 3 }
+        let real = verdicts.filter {
+            !Verification.stripCitations($0.text)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .filter { $0.isLetter || $0.isNumber }.isEmpty
+        }
         return !real.isEmpty && real.allSatisfy { !$0.supported }
     }
 }

@@ -60,6 +60,12 @@ final class TimeWindowTests: XCTestCase {
         XCTAssertNotNil(TimeWindow.parse(query: "what did I decide in May", now: now))
         XCTAssertNotNil(TimeWindow.parse(query: "notes from March", now: now))
     }
+
+    func testContentHashDoesNotLogDocumentBytes() {
+        let hash = ContentHash.sha256Hex(of: Data("secret document bytes".utf8))
+        XCTAssertEqual(hash.count, 64)
+        XCTAssertFalse(hash.contains("secret"), "hash output must not echo document text")
+    }
     func testYesterdayIntervalContainsYesterdayNotToday() {
         let w = TimeWindow.parse(query: "yesterday", now: now)!
         let yesterday = ISO8601DateFormatter().date(from: "2026-07-08T15:00:00Z")!

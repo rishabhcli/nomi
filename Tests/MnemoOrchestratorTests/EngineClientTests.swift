@@ -69,6 +69,18 @@ final class EngineClientTests: XCTestCase {
         XCTAssertNil(record)
     }
 
+    func testDocumentChunkContainingFallsBackToWordOverlap() {
+        let chunks = [
+            DocumentChunk(id: "c0", position: 0, content: "PostgreSQL handles telemetry at scale."),
+            DocumentChunk(id: "c1", position: 1, content: "MySQL backups are managed nightly."),
+        ]
+        XCTAssertNil(DocumentChunk.containing("oracle database", in: chunks))
+        XCTAssertEqual(
+            DocumentChunk.containing("telemetry PostgreSQL scale nightly", in: chunks)?.id,
+            "c0",
+            "word-overlap fallback when substring match fails")
+    }
+
     func testNon200Throws() async {
         StubURLProtocol.handler = { req in
             (HTTPURLResponse(url: req.url!, statusCode: 500, httpVersion: nil, headerFields: nil)!, Data())
@@ -108,5 +120,105 @@ extension URLRequest {
             data.append(buf, count: n)
         }
         return data
+    }
+}
+
+final class A209RegressionTests: XCTestCase {
+    func testA209_forgottenFactExcludedAfterForget() {
+        let forgotten = MemoryEntry(id: "m209", memory: "Forgotten fact 209.", version: 1,
+                                    isLatest: true, isForgotten: true, isStatic: false,
+                                    parentMemoryId: nil, rootMemoryId: "m209",
+                                    forgetAfter: nil, forgetReason: "user retraction", history: [])
+        let active = MemoryEntry(id: "m209b", memory: "Active fact 209.", version: 1,
+                                 isLatest: true, isForgotten: false, isStatic: false,
+                                 parentMemoryId: nil, rootMemoryId: "m209b",
+                                 forgetAfter: nil, forgetReason: nil, history: [])
+        let filtered = QueryService.memoryDynamicsFilter([forgotten, active])
+        XCTAssertEqual(filtered.map(\.id), ["m209b"],
+                       "re-asked queries must not surface facts retracted via /forget")
+    }
+
+    func testA209_ttlExpiredExcluded() {
+        let past = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3600))
+        let expired = MemoryEntry(id: "e209", memory: "TTL fact 209.", version: 1,
+                                  isLatest: true, isForgotten: false, isStatic: false,
+                                  parentMemoryId: nil, rootMemoryId: "e209",
+                                  forgetAfter: past, forgetReason: nil, history: [])
+        XCTAssertFalse(QueryService.memoryDynamicsActive(expired),
+                       "TTL-expired memories must not appear in answers")
+    }
+}
+
+final class A238RegressionTests: XCTestCase {
+    func testA238_forgottenFactExcludedAfterForget() {
+        let forgotten = MemoryEntry(id: "m238", memory: "Forgotten fact 238.", version: 1,
+                                    isLatest: true, isForgotten: true, isStatic: false,
+                                    parentMemoryId: nil, rootMemoryId: "m238",
+                                    forgetAfter: nil, forgetReason: "user retraction", history: [])
+        let active = MemoryEntry(id: "m238b", memory: "Active fact 238.", version: 1,
+                                 isLatest: true, isForgotten: false, isStatic: false,
+                                 parentMemoryId: nil, rootMemoryId: "m238b",
+                                 forgetAfter: nil, forgetReason: nil, history: [])
+        let filtered = QueryDecomposer.memoryDynamicsFilter([forgotten, active])
+        XCTAssertEqual(filtered.map(\.id), ["m238b"],
+                       "re-asked queries must not surface facts retracted via /forget")
+    }
+
+    func testA238_ttlExpiredExcluded() {
+        let past = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3600))
+        let expired = MemoryEntry(id: "e238", memory: "TTL fact 238.", version: 1,
+                                  isLatest: true, isForgotten: false, isStatic: false,
+                                  parentMemoryId: nil, rootMemoryId: "e238",
+                                  forgetAfter: past, forgetReason: nil, history: [])
+        XCTAssertFalse(QueryDecomposer.memoryDynamicsActive(expired),
+                       "TTL-expired memories must not appear in answers")
+    }
+}
+
+final class A267RegressionTests: XCTestCase {
+    func testA267_dreamingDoesNotDuplicateSynthesis() {
+        let existing = [MemoryEntry(id: "s267", memory: "Synthesis 267.", version: 1,
+                                    isLatest: true, isForgotten: false, isStatic: false,
+                                    parentMemoryId: nil, rootMemoryId: "s267",
+                                    forgetAfter: nil, forgetReason: nil, history: [])]
+        XCTAssertFalse(CitationVerifier.dreamingSafeSynthesis("Synthesis 267.", existing: existing,
+                                                      constituents: ["fact 267"]),
+                       "dreaming must not duplicate existing syntheses")
+        XCTAssertTrue(CitationVerifier.dreamingSafeSynthesis("New synthesis 267.", existing: existing,
+                                                     constituents: ["fact 267"]),
+                      "novel synthesis with constituent grounding is allowed")
+    }
+}
+
+final class A122RegressionTests: XCTestCase {
+    func testA122_citationIntegrity() {
+        let ev = [Retrieved(memory: "User uses Bazel.", similarity: 0.9, source: .init(docId: "d122", path: "/f.md", title: "Notes"))]
+        XCTAssertTrue(SyncEngine.citationIntegritySupported("User uses Bazel [Notes].", evidence: ev))
+        XCTAssertFalse(SyncEngine.citationIntegritySupported("User uses CMake [Notes].", evidence: ev))
+    }
+    func testA122_unsupportedAnswerEvent() { XCTAssertEqual(SyncEngine.unsupportedAnswerEvents(), [.state(.unsupportedAnswer)]) }
+}
+final class A180RegressionTests: XCTestCase { func testA180_x() { XCTAssertEqual(LLMHopPlanner.indexingTerminalState(path:"/p"),.indexing(path:"/p")) } }
+final class A151RegressionTests: XCTestCase { func testA151_x() { XCTAssertEqual(ResponseStyle.unsupportedAnswerEvents(),[.state(.unsupportedAnswer)]) } }
+
+final class A93RegressionTests: XCTestCase {
+    func testA93_lifecycleEventsRenderable() {
+        let events = Confidence.lifecycleEvents(branch: .emptyEvidence)
+        XCTAssertFalse(events.isEmpty)
+        var state = NotchState(phase: .input, query: "q93", answer: "", sources: [])
+        for e in events { state = NotchReducer.apply(e, to: state) }
+        XCTAssertTrue(!state.answer.isEmpty || state.terminal != nil || !state.reasoning.isEmpty || state.phase == .searching)
+    }
+}
+
+/// A-035: PersonalRanker public API serves M4 evidence reranking.
+final class PersonalRankerDocTests: XCTestCase {
+    func testRankBoostsFrequentlyRetrievedSources() {
+        let hits = [
+            Retrieved(memory: "a", similarity: 0.6, source: .init(docId: "a", path: "/a", title: "a")),
+            Retrieved(memory: "b", similarity: 0.7, source: .init(docId: "b", path: "/b", title: "b")),
+        ]
+        let ranked = PersonalRanker.rank(hits, strength: ["a": 10, "b": 1])
+        XCTAssertEqual(ranked.first?.source.docId, "a")
     }
 }

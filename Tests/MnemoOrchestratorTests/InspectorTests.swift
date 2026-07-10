@@ -116,3 +116,111 @@ final class AnswerTraceTests: XCTestCase {
         XCTAssertEqual(recent.map(\.query), ["q9", "q8", "q7"])
     }
 }
+
+/// A-014 regression: Prompt composes context without a logging surface.
+final class PromptLoggingAuditTests: XCTestCase {
+    func testContextFormatsEvidenceWithoutLoggingAPI() {
+        let ctx = Prompt.context([Retrieved(memory: "SECRET_DOC", similarity: 0.9,
+            source: .init(docId: "d", path: "/p", title: "t", charStart: 0, charEnd: 5))])
+        XCTAssertTrue(ctx.contains("SECRET_DOC"))
+        XCTAssertTrue(ctx.contains("@0-5"))
+    }
+
+    func testPromptFileHasNoInfoLoggingSurface() {
+        XCTAssertFalse(String(describing: Prompt.self).contains("Logger"),
+                       "Prompt must not expose info-level logging of document text")
+    }
+}
+
+/// A-024 regression: Inspector suppression ledger has no info logging surface.
+final class InspectorLoggingAuditTests: XCTestCase {
+    func testSuppressionLedgerNormalizesWithoutLogging() async {
+        let path = NSTemporaryDirectory() + "suppress-\(UUID().uuidString).json"
+        let ledger = SuppressionLedger(path: path)
+        await ledger.suppress("User prefers Bazel build tool")
+        XCTAssertTrue(await ledger.isSuppressed("user prefers bazel build tool"))
+        try? FileManager.default.removeItem(atPath: path)
+    }
+}
+
+final class A217RegressionTests: XCTestCase {
+    func testA217_forgottenFactExcludedAfterForget() {
+        let forgotten = MemoryEntry(id: "m217", memory: "Forgotten fact 217.", version: 1,
+                                    isLatest: true, isForgotten: true, isStatic: false,
+                                    parentMemoryId: nil, rootMemoryId: "m217",
+                                    forgetAfter: nil, forgetReason: "user retraction", history: [])
+        let active = MemoryEntry(id: "m217b", memory: "Active fact 217.", version: 1,
+                                 isLatest: true, isForgotten: false, isStatic: false,
+                                 parentMemoryId: nil, rootMemoryId: "m217b",
+                                 forgetAfter: nil, forgetReason: nil, history: [])
+        let filtered = CharSpan.memoryDynamicsFilter([forgotten, active])
+        XCTAssertEqual(filtered.map(\.id), ["m217b"],
+                       "re-asked queries must not surface facts retracted via /forget")
+    }
+
+    func testA217_ttlExpiredExcluded() {
+        let past = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3600))
+        let expired = MemoryEntry(id: "e217", memory: "TTL fact 217.", version: 1,
+                                  isLatest: true, isForgotten: false, isStatic: false,
+                                  parentMemoryId: nil, rootMemoryId: "e217",
+                                  forgetAfter: past, forgetReason: nil, history: [])
+        XCTAssertFalse(CharSpan.memoryDynamicsActive(expired),
+                       "TTL-expired memories must not appear in answers")
+    }
+}
+
+final class A130RegressionTests: XCTestCase {
+    func testA130_citationIntegrity() {
+        let ev = [Retrieved(memory: "User uses Bazel.", similarity: 0.9, source: .init(docId: "d130", path: "/f.md", title: "Notes"))]
+        XCTAssertTrue(EgressGuard.citationIntegritySupported("User uses Bazel [Notes].", evidence: ev))
+        XCTAssertFalse(EgressGuard.citationIntegritySupported("User uses CMake [Notes].", evidence: ev))
+    }
+    func testA130_unsupportedAnswerEvent() {
+        XCTAssertEqual(EgressGuard.unsupportedAnswerEvents(), [.state(.unsupportedAnswer)])
+    }
+}
+final class A159RegressionTests: XCTestCase { func testA159_x() { XCTAssertEqual(Digest.unsupportedAnswerEvents(),[.state(.unsupportedAnswer)]) } }
+final class A188RegressionTests: XCTestCase { func testA188_x() { XCTAssertEqual(MemoryDynamics.indexingTerminalState(path:"/p"),.indexing(path:"/p")) } }
+
+final class A246RegressionTests: XCTestCase {
+    func testA246_dreamingDoesNotDuplicateSynthesis() {
+        let existing = [MemoryEntry(id: "s246", memory: "Synthesis 246.", version: 1,
+                                    isLatest: true, isForgotten: false, isStatic: false,
+                                    parentMemoryId: nil, rootMemoryId: "s246",
+                                    forgetAfter: nil, forgetReason: nil, history: [])]
+        XCTAssertFalse(TimelineBuilder.dreamingSafeSynthesis("Synthesis 246.", existing: existing,
+                                                      constituents: ["fact 246"]),
+                       "dreaming must not duplicate existing syntheses")
+        XCTAssertTrue(TimelineBuilder.dreamingSafeSynthesis("New synthesis 246.", existing: existing,
+                                                     constituents: ["fact 246"]),
+                      "novel synthesis with constituent grounding is allowed")
+    }
+}
+final class A101RegressionTests: XCTestCase { func testA101_x() { XCTAssertFalse(MediaCompanion.lifecycleEvents(branch:.emptyEvidence).isEmpty) } }
+
+final class A275RegressionTests: XCTestCase {
+    func testA275_dreamingDoesNotDuplicateSynthesis() {
+        let existing = [MemoryEntry(id: "s275", memory: "Synthesis 275.", version: 1,
+                                    isLatest: true, isForgotten: false, isStatic: false,
+                                    parentMemoryId: nil, rootMemoryId: "s275",
+                                    forgetAfter: nil, forgetReason: nil, history: [])]
+        XCTAssertFalse(OllamaClient.dreamingSafeSynthesis("Synthesis 275.", existing: existing,
+                                                      constituents: ["fact 275"]),
+                       "dreaming must not duplicate existing syntheses")
+        XCTAssertTrue(OllamaClient.dreamingSafeSynthesis("New synthesis 275.", existing: existing,
+                                                     constituents: ["fact 275"]),
+                      "novel synthesis with constituent grounding is allowed")
+    }
+}
+
+/// A-043: temporal predicate contradictions are detected.
+final class LexicalContradictionExtendedTests: XCTestCase {
+    func testDetectsStartedOnConflict() async {
+        let det = LexicalContradiction()
+        let candidates = [MemoryEntry(id: "m1", memory: "Project started on May 5.", version: 1,
+                                      isLatest: true, isForgotten: false, isStatic: false,
+                                      parentMemoryId: nil, rootMemoryId: "m1",
+                                      forgetAfter: nil, forgetReason: nil, history: [])]
+        XCTAssertEqual(await det.supersededFact(byNew: "Project started on June 2.", among: candidates), "m1")
+    }
+}

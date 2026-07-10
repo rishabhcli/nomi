@@ -35,4 +35,16 @@ final class LoopbackAuditTests: XCTestCase {
         XCTAssertEqual(sockets, [ListeningSocket(command: "rogue", pid: 504, address: "*:8080")])
         XCTAssertEqual(LoopbackAudit.nonLoopback(sockets).map(\.address), ["*:8080"])
     }
+
+    func testRivetAndSmfsPortsRecognized() {
+        let fixture = """
+        COMMAND   PID USER   FD   TYPE DEVICE SIZE/OFF NODE NAME
+        rivet     505 m3    12u  IPv4  0x6      0t0  TCP 127.0.0.1:6420 (LISTEN)
+        smfs      506 m3    13u  IPv4  0x7      0t0  TCP 127.0.0.1:11111 (LISTEN)
+        """
+        let sockets = LoopbackAudit.parseLSOF(fixture)
+        XCTAssertEqual(sockets.count, 2)
+        XCTAssertTrue(sockets.allSatisfy { LoopbackAudit.isMnemoOwned($0) })
+        XCTAssertTrue(LoopbackAudit.nonLoopback(sockets).isEmpty)
+    }
 }

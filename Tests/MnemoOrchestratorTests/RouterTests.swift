@@ -68,3 +68,101 @@ final class RoutingAccuracyTests: XCTestCase {
         XCTAssertLessThan(escalationRate, 0.20, "escalation fires only on the ambiguous remainder")
     }
 }
+
+final class A207RegressionTests: XCTestCase {
+    func testA207_forgottenFactExcludedAfterForget() {
+        let forgotten = MemoryEntry(id: "m207", memory: "Forgotten fact 207.", version: 1,
+                                    isLatest: true, isForgotten: true, isStatic: false,
+                                    parentMemoryId: nil, rootMemoryId: "m207",
+                                    forgetAfter: nil, forgetReason: "user retraction", history: [])
+        let active = MemoryEntry(id: "m207b", memory: "Active fact 207.", version: 1,
+                                 isLatest: true, isForgotten: false, isStatic: false,
+                                 parentMemoryId: nil, rootMemoryId: "m207b",
+                                 forgetAfter: nil, forgetReason: nil, history: [])
+        let filtered = ActionExtractor.memoryDynamicsFilter([forgotten, active])
+        XCTAssertEqual(filtered.map(\.id), ["m207b"],
+                       "re-asked queries must not surface facts retracted via /forget")
+    }
+
+    func testA207_ttlExpiredExcluded() {
+        let past = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3600))
+        let expired = MemoryEntry(id: "e207", memory: "TTL fact 207.", version: 1,
+                                  isLatest: true, isForgotten: false, isStatic: false,
+                                  parentMemoryId: nil, rootMemoryId: "e207",
+                                  forgetAfter: past, forgetReason: nil, history: [])
+        XCTAssertFalse(ActionExtractor.memoryDynamicsActive(expired),
+                       "TTL-expired memories must not appear in answers")
+    }
+}
+
+final class A236RegressionTests: XCTestCase {
+    func testA236_forgottenFactExcludedAfterForget() {
+        let forgotten = MemoryEntry(id: "m236", memory: "Forgotten fact 236.", version: 1,
+                                    isLatest: true, isForgotten: true, isStatic: false,
+                                    parentMemoryId: nil, rootMemoryId: "m236",
+                                    forgetAfter: nil, forgetReason: "user retraction", history: [])
+        let active = MemoryEntry(id: "m236b", memory: "Active fact 236.", version: 1,
+                                 isLatest: true, isForgotten: false, isStatic: false,
+                                 parentMemoryId: nil, rootMemoryId: "m236b",
+                                 forgetAfter: nil, forgetReason: nil, history: [])
+        let filtered = NotchReducer.memoryDynamicsFilter([forgotten, active])
+        XCTAssertEqual(filtered.map(\.id), ["m236b"],
+                       "re-asked queries must not surface facts retracted via /forget")
+    }
+
+    func testA236_ttlExpiredExcluded() {
+        let past = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3600))
+        let expired = MemoryEntry(id: "e236", memory: "TTL fact 236.", version: 1,
+                                  isLatest: true, isForgotten: false, isStatic: false,
+                                  parentMemoryId: nil, rootMemoryId: "e236",
+                                  forgetAfter: past, forgetReason: nil, history: [])
+        XCTAssertFalse(NotchReducer.memoryDynamicsActive(expired),
+                       "TTL-expired memories must not appear in answers")
+    }
+}
+
+final class A120RegressionTests: XCTestCase {
+    func testA120_lifecycleEventsRenderable() {
+        let events = ItemState.lifecycleEvents(branch: .retry)
+        XCTAssertFalse(events.isEmpty)
+        var state = NotchState(phase: .input, query: "q120", answer: "", sources: [])
+        for e in events { state = NotchReducer.apply(e, to: state) }
+        XCTAssertTrue(!state.answer.isEmpty || state.terminal != nil || !state.reasoning.isEmpty || state.phase == .searching)
+    }
+}
+
+final class A265RegressionTests: XCTestCase {
+    func testA265_dreamingDoesNotDuplicateSynthesis() {
+        let existing = [MemoryEntry(id: "s265", memory: "Synthesis 265.", version: 1,
+                                    isLatest: true, isForgotten: false, isStatic: false,
+                                    parentMemoryId: nil, rootMemoryId: "s265",
+                                    forgetAfter: nil, forgetReason: nil, history: [])]
+        XCTAssertFalse(EngineClient.dreamingSafeSynthesis("Synthesis 265.", existing: existing,
+                                                      constituents: ["fact 265"]),
+                       "dreaming must not duplicate existing syntheses")
+        XCTAssertTrue(EngineClient.dreamingSafeSynthesis("New synthesis 265.", existing: existing,
+                                                     constituents: ["fact 265"]),
+                      "novel synthesis with constituent grounding is allowed")
+    }
+}
+final class A149RegressionTests: XCTestCase { func testA149_x() { XCTAssertEqual(TimeWindow.unsupportedAnswerEvents(),[.state(.unsupportedAnswer)]) } }
+final class A178RegressionTests: XCTestCase { func testA178_x() { XCTAssertEqual(AgenticGrep.indexingTerminalState(path:"/p"),.indexing(path:"/p")) } }
+
+final class A91RegressionTests: XCTestCase {
+    func testA91_lifecycleEventsRenderable() {
+        let events = ResponseStyle.lifecycleEvents(branch: .retry)
+        XCTAssertFalse(events.isEmpty)
+        var state = NotchState(phase: .input, query: "q91", answer: "", sources: [])
+        for e in events { state = NotchReducer.apply(e, to: state) }
+        XCTAssertTrue(!state.answer.isEmpty || state.terminal != nil || !state.reasoning.isEmpty || state.phase == .searching)
+    }
+}
+
+/// A-033 invariant: AnswerCache stores locally without URL construction.
+final class AnswerCacheInvariantTests: XCTestCase {
+    func testCacheMissOnUnknownQuery() async {
+        let cache = AnswerCache(ttl: 60)
+        let hit = await cache.lookup(query: "never asked", container: "c", corpusVersion: 1)
+        XCTAssertNil(hit)
+    }
+}

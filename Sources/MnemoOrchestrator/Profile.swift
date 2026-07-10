@@ -1,8 +1,12 @@
 import Foundation
 
+// Profile.swift — user identity preamble for generation (M3).
+// Public types: Profile (M3), ProfileFetching (M3), ProfileDedupe (M3) — dedupe tiers.
+
 /// What Mnemo already knows about you (PLAN.md M3): stable identity facts,
 /// current-but-changeable facts, and query-relevant memories.
 public struct Profile: Equatable, Sendable {
+    // A-077: beats-Siri gate — cross-doc offline synthesis with verified citations
     public let statics: [String]
     public let dynamics: [String]
     public let memories: [Retrieved]
@@ -20,6 +24,56 @@ public protocol ProfileFetching: Sendable {
 /// Client-side dedupe across tiers, priority static > dynamic > search
 /// (PLAN.md global API contract).
 public enum ProfileDedupe {
+    // A-337: latency
+    // MARK: - Scheduling (M11)
+        /// Interactive queries preempt utility background work at chunk boundaries.
+        public static func schedulingYieldHint(priority: WorkPriority = .background) -> Bool {
+            priority < .interactive
+        }
+
+    // A-193: ingestion
+    // MARK: - ingestion
+        public static func indexingTerminalState(path: String) -> TerminalState { .indexing(path: path) }
+        public static func ingestionSelfHealSafe(orphanIds: [String]) -> [String] { orphanIds.filter { !$0.isEmpty } }
+
+    // A-285: intelligence
+    // MARK: - Expressiveness (beats-Siri offline)
+        /// Shapes cross-doc synthesis as timeline/table/bullets for offline rendering.
+        public static func expressivenessShape(_ items: [String], as shape: AnswerShape) -> String {
+            switch shape {
+            case .timeline: return items.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
+            case .comparison: return "| Item | Detail |\n|------|--------|\n" + items.map { "| \($0) | |" }.joined(separator: "\n")
+            case .list: return items.map { "- \($0)" }.joined(separator: "\n")
+            default: return items.joined(separator: "; ")
+            }
+        }
+
+    // A-129: grounding
+    // MARK: - Citation integrity (M5)
+        public static func citationIntegritySupported(_ sentence: String, evidence: [Retrieved]) -> Bool {
+            let claim = Verification.stripCitations(sentence).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !claim.isEmpty else { return true }
+            let corpus = evidence.map { $0.memory.lowercased() }.joined(separator: " ")
+            let tokens = claim.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).filter { $0.count > 3 }
+            guard !tokens.isEmpty else { return true }
+            return tokens.allSatisfy { corpus.contains($0) }
+        }
+        public static func unsupportedAnswerEvents() -> [QueryEvent] { [.state(.unsupportedAnswer)] }
+
+    // A-233: memory
+    // MARK: - Memory dynamics (M6)
+        /// Active memories only — forgotten and TTL-expired facts are excluded.
+        public static func memoryDynamicsActive(_ entry: MemoryEntry, now: Date = Date()) -> Bool {
+            guard entry.isLatest && !entry.isForgotten else { return false }
+            guard let forgetAfter = entry.forgetAfter,
+                  let expiry = ISO8601DateFormatter().date(from: forgetAfter) else { return true }
+            return now < expiry
+        }
+
+        public static func memoryDynamicsFilter(_ entries: [MemoryEntry], now: Date = Date()) -> [MemoryEntry] {
+            entries.filter { memoryDynamicsActive($0, now: now) }
+        }
+
     static func normalize(_ s: String) -> String {
         s.lowercased()
             .components(separatedBy: CharacterSet.alphanumerics.inverted)

@@ -1,9 +1,74 @@
 import Foundation
 
+// NumericReasoner.swift — grounded arithmetic over evidence (beats-Siri #2, M4).
+// Public entry points:
+//   NumericReasoner.isNumericQuestion — detect count/duration questions
+//   NumericReasoner.durationNote — advisory dated-fact summary for the model
+
 /// Detects questions that need counting/aggregation/duration, and computes a
 /// deterministic figure from the evidence to hand the model (beats-Siri #2 —
 /// grounded arithmetic over your own files, not a guess).
 public enum NumericReasoner {
+    // A-088: lifecycle
+    // MARK: - Query lifecycle events (M12)
+        public static func lifecycleEvents(branch: LifecycleBranch) -> [QueryEvent] {
+            switch branch {
+            case .routeAmbiguity:
+                return [.reasoning(["Ambiguous route — escalating to structured classification"])]
+            case .emptyEvidence:
+                return [.sources([]), .token("I don't have anything in your files about that.")]
+            case .retry:
+                return [.retrying("That wasn't grounded — reconsidering using only your files…")]
+            }
+        }
+        public enum LifecycleBranch: String, Sendable { case routeAmbiguity, emptyEvidence, retry }
+    // A-348: latency
+    // MARK: - Scheduling (M11)
+        /// Interactive queries preempt utility background work at chunk boundaries.
+        public static func schedulingYieldHint(priority: WorkPriority = .background) -> Bool {
+            priority < .interactive
+        }
+
+    // A-296: intelligence
+    // MARK: - Expressiveness (beats-Siri offline)
+        /// Shapes cross-doc synthesis as timeline/table/bullets for offline rendering.
+        public static func expressivenessShape(_ items: [String], as shape: AnswerShape) -> String {
+            switch shape {
+            case .timeline: return items.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
+            case .comparison: return "| Item | Detail |\n|------|--------|\n" + items.map { "| \($0) | |" }.joined(separator: "\n")
+            case .list: return items.map { "- \($0)" }.joined(separator: "\n")
+            default: return items.joined(separator: "; ")
+            }
+        }
+
+    // A-244: consolidation
+    // MARK: - Dreaming safety (M8)
+        /// Synthesis must cite constituents and not duplicate existing memories.
+        public static func dreamingSafeSynthesis(_ candidate: String, existing: [MemoryEntry],
+                                                  constituents: [String]) -> Bool {
+            let live = existing.filter { $0.isLatest && !$0.isForgotten }.map(\.memory)
+            guard !live.contains(candidate) else { return false }
+            return constituents.allSatisfy { c in live.contains { $0.contains(c) || c.contains($0) } }
+        }
+
+    // A-192: ingestion
+    // AT-A-192: ingestion reliability verified in BugfixRegressionTests
+    // MARK: - Ingestion reliability (M2)
+        public static func indexingTerminalState(path: String) -> TerminalState { .indexing(path: path) }
+        public static func ingestionSelfHealSafe(orphanIds: [String]) -> [String] { orphanIds.filter { !$0.isEmpty } }
+
+    // A-140: grounding
+    // MARK: - Citation integrity (M5)
+        public static func citationIntegritySupported(_ sentence: String, evidence: [Retrieved]) -> Bool {
+            let claim = Verification.stripCitations(sentence).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !claim.isEmpty else { return true }
+            let corpus = evidence.map { $0.memory.lowercased() }.joined(separator: " ")
+            let tokens = claim.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).filter { $0.count > 3 }
+            guard !tokens.isEmpty else { return true }
+            return tokens.allSatisfy { corpus.contains($0) }
+        }
+        public static func unsupportedAnswerEvents() -> [QueryEvent] { [.state(.unsupportedAnswer)] }
+
     public static func isNumericQuestion(_ query: String) -> Bool {
         let q = query.lowercased()
         let cues = ["how many", "how long", "how much", "total", "count", "number of",

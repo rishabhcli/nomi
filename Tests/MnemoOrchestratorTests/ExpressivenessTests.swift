@@ -188,3 +188,81 @@ final class ExpressiveReducerTests: XCTestCase {
         XCTAssertEqual(s.confidenceFraming, "")
     }
 }
+
+final class A225RegressionTests: XCTestCase {
+    func testA225_forgottenFactExcludedAfterForget() {
+        let forgotten = MemoryEntry(id: "m225", memory: "Forgotten fact 225.", version: 1,
+                                    isLatest: true, isForgotten: true, isStatic: false,
+                                    parentMemoryId: nil, rootMemoryId: "m225",
+                                    forgetAfter: nil, forgetReason: "user retraction", history: [])
+        let active = MemoryEntry(id: "m225b", memory: "Active fact 225.", version: 1,
+                                 isLatest: true, isForgotten: false, isStatic: false,
+                                 parentMemoryId: nil, rootMemoryId: "m225b",
+                                 forgetAfter: nil, forgetReason: nil, history: [])
+        let filtered = IngestGate.memoryDynamicsFilter([forgotten, active])
+        XCTAssertEqual(filtered.map(\.id), ["m225b"],
+                       "re-asked queries must not surface facts retracted via /forget")
+    }
+
+    func testA225_ttlExpiredExcluded() {
+        let past = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3600))
+        let expired = MemoryEntry(id: "e225", memory: "TTL fact 225.", version: 1,
+                                  isLatest: true, isForgotten: false, isStatic: false,
+                                  parentMemoryId: nil, rootMemoryId: "e225",
+                                  forgetAfter: past, forgetReason: nil, history: [])
+        XCTAssertFalse(IngestGate.memoryDynamicsActive(expired),
+                       "TTL-expired memories must not appear in answers")
+    }
+}
+
+final class A254RegressionTests: XCTestCase {
+    func testA254_dreamingDoesNotDuplicateSynthesis() {
+        let existing = [MemoryEntry(id: "s254", memory: "Synthesis 254.", version: 1,
+                                    isLatest: true, isForgotten: false, isStatic: false,
+                                    parentMemoryId: nil, rootMemoryId: "s254",
+                                    forgetAfter: nil, forgetReason: nil, history: [])]
+        XCTAssertFalse(LocalExtractor.dreamingSafeSynthesis("Synthesis 254.", existing: existing,
+                                                      constituents: ["fact 254"]),
+                       "dreaming must not duplicate existing syntheses")
+        XCTAssertTrue(LocalExtractor.dreamingSafeSynthesis("New synthesis 254.", existing: existing,
+                                                     constituents: ["fact 254"]),
+                      "novel synthesis with constituent grounding is allowed")
+    }
+}
+
+final class A167RegressionTests: XCTestCase {
+    func testA167_indexingTerminal() {
+        let t = KeywordBackstop.indexingTerminalState(path: "/f167.pdf")
+        guard case .indexing(let p) = t else { return XCTFail() }
+        XCTAssertEqual(p, "/f167.pdf")
+    }
+    func testA167_selfHealSafe() {
+        XCTAssertEqual(KeywordBackstop.ingestionSelfHealSafe(orphanIds: ["m167", ""]), ["m167"])
+    }
+}
+
+final class A109RegressionTests: XCTestCase {
+    func testA109_lifecycleEventsRenderable() {
+        let events = EngineClient.lifecycleEvents(branch: .routeAmbiguity)
+        XCTAssertFalse(events.isEmpty)
+        var state = NotchState(phase: .input, query: "q109", answer: "", sources: [])
+        for e in events { state = NotchReducer.apply(e, to: state) }
+        XCTAssertTrue(!state.answer.isEmpty || state.terminal != nil || !state.reasoning.isEmpty || state.phase == .searching)
+    }
+}
+final class A196RegressionTests: XCTestCase {
+    func testA196_ingest() {
+        XCTAssertEqual(NotchReducer.indexingTerminalState(path:"/a.pdf"),.indexing(path:"/a.pdf"))
+        XCTAssertEqual(NotchReducer.ingestionSelfHealSafe(orphanIds:["x",""]),["x"])
+    }
+}
+
+/// A-022 audit: ColdArchive.archivable is pure policy with no force-unwraps.
+final class ConsolidationAuditTests: XCTestCase {
+    func testColdArchiveIdentifiesStaleMemories() {
+        let old = Date().addingTimeInterval(-90 * 86400)
+        let records = ["m1": StrengthRecord(retrievalCount: 1, lastRetrieved: old)]
+        let archivable = ColdArchive.archivable(records: records, now: Date(), thresholdDays: 30)
+        XCTAssertEqual(archivable, ["m1"])
+    }
+}

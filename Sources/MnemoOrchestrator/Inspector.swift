@@ -1,5 +1,8 @@
 import Foundation
 
+// Inspector.swift — M9 memory inspector and suppression ledger.
+// A-024 audit: no info-level logging of user document or memory text.
+
 /// User retractions that must survive re-ingest of the same content
 /// (PLAN.md M9 risk mitigation). Keyed by normalized fact text; persisted.
 public actor SuppressionLedger {
@@ -21,9 +24,26 @@ public actor SuppressionLedger {
             .filter { !$0.isEmpty }.joined(separator: " ")
     }
 
-    public func suppress(_ text: String) { suppressed.insert(Self.normalize(text)); persist() }
-    public func unsuppress(_ text: String) { suppressed.remove(Self.normalize(text)); persist() }
-    public func isSuppressed(_ text: String) -> Bool { suppressed.contains(Self.normalize(text)) }
+    /// Fuzzy key: sorted significant tokens so re-extracted wording still matches.
+    static func fuzzyKey(_ s: String) -> String {
+        let stop: Set<String> = ["the", "and", "for", "with", "user", "that", "this", "from"]
+        return normalize(s).split(separator: " ").filter { $0.count > 2 && !stop.contains(String($0)) }
+            .sorted().joined(separator: " ")
+    }
+
+    public func suppress(_ text: String) {
+        suppressed.insert(Self.fuzzyKey(text))
+        suppressed.insert(Self.normalize(text))
+        persist()
+    }
+    public func unsuppress(_ text: String) {
+        suppressed.remove(Self.fuzzyKey(text))
+        suppressed.remove(Self.normalize(text))
+        persist()
+    }
+    public func isSuppressed(_ text: String) -> Bool {
+        suppressed.contains(Self.fuzzyKey(text)) || suppressed.contains(Self.normalize(text))
+    }
 
     private func persist() {
         if let data = try? JSONEncoder().encode(Array(suppressed).sorted()) {
@@ -48,6 +68,44 @@ public struct ProfileSnapshot: Equatable, Sendable {
 /// suppresses re-ingest), and correct (supersede via M6). Effects are visible
 /// on the next query with no rebuild.
 public struct MemoryInspector: Sendable {
+    // A-336: latency
+    // MARK: - Scheduling (M11)
+        /// Interactive queries preempt utility background work at chunk boundaries.
+        public static func schedulingYieldHint(priority: WorkPriority = .background) -> Bool {
+            priority < .interactive
+        }
+
+    // A-284: intelligence
+    // MARK: - Expressiveness (beats-Siri offline)
+        /// Shapes cross-doc synthesis as timeline/table/bullets for offline rendering.
+        public static func expressivenessShape(_ items: [String], as shape: AnswerShape) -> String {
+            switch shape {
+            case .timeline: return items.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
+            case .comparison: return "| Item | Detail |\n|------|--------|\n" + items.map { "| \($0) | |" }.joined(separator: "\n")
+            case .list: return items.map { "- \($0)" }.joined(separator: "\n")
+            default: return items.joined(separator: "; ")
+            }
+        }
+
+    // A-192: ingestion
+    // MARK: - ingestion
+        public static func indexingTerminalState(path: String) -> TerminalState { .indexing(path: path) }
+        public static func ingestionSelfHealSafe(orphanIds: [String]) -> [String] { orphanIds.filter { !$0.isEmpty } }
+
+    // A-232: memory
+    // MARK: - Memory dynamics (M6)
+        /// Active memories only — forgotten and TTL-expired facts are excluded.
+        public static func memoryDynamicsActive(_ entry: MemoryEntry, now: Date = Date()) -> Bool {
+            guard entry.isLatest && !entry.isForgotten else { return false }
+            guard let forgetAfter = entry.forgetAfter,
+                  let expiry = ISO8601DateFormatter().date(from: forgetAfter) else { return true }
+            return now < expiry
+        }
+
+        public static func memoryDynamicsFilter(_ entries: [MemoryEntry], now: Date = Date()) -> [MemoryEntry] {
+            entries.filter { memoryDynamicsActive($0, now: now) }
+        }
+
     let store: MemoryStoring
     let container: String?
     let suppression: SuppressionLedger

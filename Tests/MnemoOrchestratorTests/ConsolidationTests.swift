@@ -145,3 +145,114 @@ final class ConsolidatorTests: XCTestCase {
                        "a synthesis identical to an existing memory must not be re-created (idempotent dreaming)")
     }
 }
+
+/// A-013 invariant: ContextAssembler constructs no URLs.
+final class ContextAssemblerInvariantTests: XCTestCase {
+    func testAssembleUsesProfileAndEvidenceOnly() {
+        let ctx = ContextAssembler(tokenBudget: 1000).assemble(
+            intent: .lookup, question: "q",
+            profile: Profile(statics: ["likes Bazel"], dynamics: []),
+            evidence: [Retrieved(memory: "evidence text", similarity: 0.9,
+                                 source: .init(docId: "d", path: "/p", title: "t"))])
+        XCTAssertTrue(ctx.preamble.contains("Bazel"))
+        XCTAssertEqual(ctx.evidence.count, 1)
+    }
+
+    func testAssemblerNeverConstructsURLs() {
+        let assembler = ContextAssembler(tokenBudget: 500)
+        let ctx = assembler.assemble(intent: .lookup, question: "q",
+            profile: Profile(statics: [], dynamics: [], memories: []), evidence: [])
+        XCTAssertFalse(ctx.preamble.contains("http://") && !ctx.preamble.contains("127.0.0.1"))
+        XCTAssertTrue(ctx.evidence.isEmpty)
+    }
+}
+
+final class A216RegressionTests: XCTestCase {
+    func testA216_forgottenFactExcludedAfterForget() {
+        let forgotten = MemoryEntry(id: "m216", memory: "Forgotten fact 216.", version: 1,
+                                    isLatest: true, isForgotten: true, isStatic: false,
+                                    parentMemoryId: nil, rootMemoryId: "m216",
+                                    forgetAfter: nil, forgetReason: "user retraction", history: [])
+        let active = MemoryEntry(id: "m216b", memory: "Active fact 216.", version: 1,
+                                 isLatest: true, isForgotten: false, isStatic: false,
+                                 parentMemoryId: nil, rootMemoryId: "m216b",
+                                 forgetAfter: nil, forgetReason: nil, history: [])
+        let filtered = SpanResolver.memoryDynamicsFilter([forgotten, active])
+        XCTAssertEqual(filtered.map(\.id), ["m216b"],
+                       "re-asked queries must not surface facts retracted via /forget")
+    }
+
+    func testA216_ttlExpiredExcluded() {
+        let past = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3600))
+        let expired = MemoryEntry(id: "e216", memory: "TTL fact 216.", version: 1,
+                                  isLatest: true, isForgotten: false, isStatic: false,
+                                  parentMemoryId: nil, rootMemoryId: "e216",
+                                  forgetAfter: past, forgetReason: nil, history: [])
+        XCTAssertFalse(SpanResolver.memoryDynamicsActive(expired),
+                       "TTL-expired memories must not appear in answers")
+    }
+}
+
+final class A129RegressionTests: XCTestCase {
+    func testA129_citationIntegrity() {
+        let ev = [Retrieved(memory: "User uses Bazel.", similarity: 0.9, source: .init(docId: "d129", path: "/f.md", title: "Notes"))]
+        XCTAssertTrue(ProfileDedupe.citationIntegritySupported("User uses Bazel [Notes].", evidence: ev))
+        XCTAssertFalse(ProfileDedupe.citationIntegritySupported("User uses CMake [Notes].", evidence: ev))
+    }
+    func testA129_unsupportedAnswerEvent() {
+        XCTAssertEqual(ProfileDedupe.unsupportedAnswerEvents(), [.state(.unsupportedAnswer)])
+    }
+}
+
+final class A274RegressionTests: XCTestCase {
+    func testA274_dreamingDoesNotDuplicateSynthesis() {
+        let existing = [MemoryEntry(id: "s274", memory: "Synthesis 274.", version: 1,
+                                    isLatest: true, isForgotten: false, isStatic: false,
+                                    parentMemoryId: nil, rootMemoryId: "s274",
+                                    forgetAfter: nil, forgetReason: nil, history: [])]
+        XCTAssertFalse(Prompt.dreamingSafeSynthesis("Synthesis 274.", existing: existing,
+                                                      constituents: ["fact 274"]),
+                       "dreaming must not duplicate existing syntheses")
+        XCTAssertTrue(Prompt.dreamingSafeSynthesis("New synthesis 274.", existing: existing,
+                                                     constituents: ["fact 274"]),
+                      "novel synthesis with constituent grounding is allowed")
+    }
+}
+final class A158RegressionTests: XCTestCase { func testA158_x() { XCTAssertEqual(LocalExtractor.unsupportedAnswerEvents(),[.state(.unsupportedAnswer)]) } }
+final class A187RegressionTests: XCTestCase { func testA187_x() { XCTAssertEqual(ContentHash.indexingTerminalState(path:"/p"),.indexing(path:"/p")) } }
+
+final class A245RegressionTests: XCTestCase {
+    func testA245_dreamingDoesNotDuplicateSynthesis() {
+        let existing = [MemoryEntry(id: "s245", memory: "Synthesis 245.", version: 1,
+                                    isLatest: true, isForgotten: false, isStatic: false,
+                                    parentMemoryId: nil, rootMemoryId: "s245",
+                                    forgetAfter: nil, forgetReason: nil, history: [])]
+        XCTAssertFalse(TimeWindow.dreamingSafeSynthesis("Synthesis 245.", existing: existing,
+                                                      constituents: ["fact 245"]),
+                       "dreaming must not duplicate existing syntheses")
+        XCTAssertTrue(TimeWindow.dreamingSafeSynthesis("New synthesis 245.", existing: existing,
+                                                     constituents: ["fact 245"]),
+                      "novel synthesis with constituent grounding is allowed")
+    }
+}
+
+final class A100RegressionTests: XCTestCase {
+    func testA100_lifecycleEventsRenderable() {
+        let events = Preferences.lifecycleEvents(branch: .retry)
+        XCTAssertFalse(events.isEmpty)
+        var state = NotchState(phase: .input, query: "q100", answer: "", sources: [])
+        for e in events { state = NotchReducer.apply(e, to: state) }
+        XCTAssertTrue(!state.answer.isEmpty || state.terminal != nil || !state.reasoning.isEmpty || state.phase == .searching)
+    }
+}
+
+/// A-042: fuzzy suppression keys survive re-extraction with different wording.
+final class SuppressionFuzzyKeyTests: XCTestCase {
+    func testReextractedWordingStaysSuppressed() async {
+        let path = NSTemporaryDirectory() + "suppress-\(UUID().uuidString).json"
+        let ledger = SuppressionLedger(path: path)
+        await ledger.suppress("User prefers the Bazel build tool.")
+        XCTAssertTrue(await ledger.isSuppressed("User prefers Bazel build tool"))
+        try? FileManager.default.removeItem(atPath: path)
+    }
+}

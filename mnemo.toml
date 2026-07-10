@@ -5,6 +5,7 @@
 base_url = "http://127.0.0.1:6767"     # MUST be loopback; validated at startup
 byom = "ollama"                         # engine's generation slot -> local model
 embeddings = "local"                    # never remote
+timeout_ms = 30000
 
 [model]
 runtime_base_url = "http://127.0.0.1:11434"
@@ -25,19 +26,25 @@ backing_store = "http://127.0.0.1:6767" # MUST equal engine.base_url; refuse clo
 [sync]
 poll_seconds = 30
 queue_max = 4096
+self_heal_enabled = true
 
 [retrieval]
 default_mode = "memories"               # memories | hybrid
 rerank = true
 threshold = 0.35
 limit = 12
+max_hops = 6
+chunk_limit = 50
 
 [agentic]
 max_hops = 6
 
 [dreaming]
+enabled = true
 interval = "6h"
 cold_threshold_days = 30
+max_synthesis_tokens = 2048
+archive_never_retrieved = false
 
 [sla]
 first_token_ms = 1500                   # P95 under background load
@@ -51,7 +58,46 @@ notch_hover_zone_px = 8                 # cursor proximity to the top edge that 
 virtual_notch = true                    # draw a notch on displays without a physical one
 glass = "regular"                       # Liquid Glass variant: regular | clear
 reduce_motion = "system"                # follow the system Reduce Motion setting for morphs
+panel_level = "floating"
 
 [privacy]
 egress_guard = "enforce"                # enforce | audit; enforce = block + fail
 telemetry = "off"                       # for app, engine, smfs, and ollama
+show_egress_indicator = true
+block_on_egress = true
+
+[logging]
+level = "info"
+rotation_mb = 50
+
+[bench]
+warmup_runs = 1
+sample_size = 4
+
+[health]
+probe_interval = 250
+
+[supervisor]
+restart_backoff = 1000
+
+[verification]
+strict_mode = false
+
+[profile]
+max_facts = 20
+
+[ingest]
+poll_interval = 30
+max_file_mb = 100
+
+[context]
+max_tokens = 8000
+
+[router]
+escalation_threshold = 0.6
+
+[media]
+retry_count = 2
+
+[inspector]
+suppression_ttl_days = 365

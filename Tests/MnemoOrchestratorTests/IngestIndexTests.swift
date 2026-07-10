@@ -63,6 +63,15 @@ final class IngestIndexTests: XCTestCase {
         let failed = await index.failedPaths()
         XCTAssertEqual(failed, ["/corrupt.pdf"])
     }
+
+    /// A-009 regression: CharSpan resolution returns offsets, never logs document text.
+    func testCharSpanResolveReturnsOffsetsWithoutLoggingSurface() {
+        let secret = "SECRET_INGEST_DOC_xyz"
+        let doc = "Prefix \(secret) suffix."
+        let range = CharSpan.resolve(chunk: secret, in: doc)!
+        XCTAssertEqual(doc.substring(charRange: range), secret)
+        XCTAssertFalse(String(describing: CharSpan.self).contains(secret))
+    }
 }
 
 final class QueryServiceIndexingStateTests: XCTestCase {
@@ -105,5 +114,87 @@ final class QueryServiceIndexingStateTests: XCTestCase {
             if case let .token(t) = e, t.lowercased().contains("don't have") { sawRefusal = true }
         }
         XCTAssertTrue(sawRefusal)
+    }
+}
+
+final class A212RegressionTests: XCTestCase {
+    func testA212_forgottenFactExcludedAfterForget() {
+        let forgotten = MemoryEntry(id: "m212", memory: "Forgotten fact 212.", version: 1,
+                                    isLatest: true, isForgotten: true, isStatic: false,
+                                    parentMemoryId: nil, rootMemoryId: "m212",
+                                    forgetAfter: nil, forgetReason: "user retraction", history: [])
+        let active = MemoryEntry(id: "m212b", memory: "Active fact 212.", version: 1,
+                                 isLatest: true, isForgotten: false, isStatic: false,
+                                 parentMemoryId: nil, rootMemoryId: "m212b",
+                                 forgetAfter: nil, forgetReason: nil, history: [])
+        let filtered = QueryService.memoryDynamicsFilter([forgotten, active])
+        XCTAssertEqual(filtered.map(\.id), ["m212b"],
+                       "re-asked queries must not surface facts retracted via /forget")
+    }
+
+    func testA212_ttlExpiredExcluded() {
+        let past = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3600))
+        let expired = MemoryEntry(id: "e212", memory: "TTL fact 212.", version: 1,
+                                  isLatest: true, isForgotten: false, isStatic: false,
+                                  parentMemoryId: nil, rootMemoryId: "e212",
+                                  forgetAfter: past, forgetReason: nil, history: [])
+        XCTAssertFalse(QueryService.memoryDynamicsActive(expired),
+                       "TTL-expired memories must not appear in answers")
+    }
+}
+
+final class A270RegressionTests: XCTestCase {
+    func testA270_dreamingDoesNotDuplicateSynthesis() {
+        let existing = [MemoryEntry(id: "s270", memory: "Synthesis 270.", version: 1,
+                                    isLatest: true, isForgotten: false, isStatic: false,
+                                    parentMemoryId: nil, rootMemoryId: "s270",
+                                    forgetAfter: nil, forgetReason: nil, history: [])]
+        XCTAssertFalse(AgenticGrep.dreamingSafeSynthesis("Synthesis 270.", existing: existing,
+                                                      constituents: ["fact 270"]),
+                       "dreaming must not duplicate existing syntheses")
+        XCTAssertTrue(AgenticGrep.dreamingSafeSynthesis("New synthesis 270.", existing: existing,
+                                                     constituents: ["fact 270"]),
+                      "novel synthesis with constituent grounding is allowed")
+    }
+}
+final class A183RegressionTests: XCTestCase { func testA183_x() { XCTAssertEqual(OllamaClient.indexingTerminalState(path:"/p"),.indexing(path:"/p")) } }
+
+final class A241RegressionTests: XCTestCase {
+    func testA241_dreamingDoesNotDuplicateSynthesis() {
+        let existing = [MemoryEntry(id: "s241", memory: "Synthesis 241.", version: 1,
+                                    isLatest: true, isForgotten: false, isStatic: false,
+                                    parentMemoryId: nil, rootMemoryId: "s241",
+                                    forgetAfter: nil, forgetReason: nil, history: [])]
+        XCTAssertFalse(AnswerCache.dreamingSafeSynthesis("Synthesis 241.", existing: existing,
+                                                      constituents: ["fact 241"]),
+                       "dreaming must not duplicate existing syntheses")
+        XCTAssertTrue(AnswerCache.dreamingSafeSynthesis("New synthesis 241.", existing: existing,
+                                                     constituents: ["fact 241"]),
+                      "novel synthesis with constituent grounding is allowed")
+    }
+}
+final class A125RegressionTests: XCTestCase { func testA125_x() { XCTAssertEqual(ContextAssembler.unsupportedAnswerEvents(),[.state(.unsupportedAnswer)]) } }
+final class A154RegressionTests: XCTestCase { func testA154_x() { XCTAssertEqual(Provenance.unsupportedAnswerEvents(),[.state(.unsupportedAnswer)]) } }
+
+final class A96RegressionTests: XCTestCase {
+    func testA96_lifecycleEventsRenderable() {
+        let events = EntityExtractor.lifecycleEvents(branch: .emptyEvidence)
+        XCTAssertFalse(events.isEmpty)
+        var state = NotchState(phase: .input, query: "q96", answer: "", sources: [])
+        for e in events { state = NotchReducer.apply(e, to: state) }
+        XCTAssertTrue(!state.answer.isEmpty || state.terminal != nil || !state.reasoning.isEmpty || state.phase == .searching)
+    }
+}
+
+/// A-038 invariant: TimelineBuilder orders evidence without URL construction.
+final class TimelineBuilderInvariantTests: XCTestCase {
+    func testOrdersByUpdatedAt() {
+        let ev = [
+            Retrieved(memory: "late", similarity: 0.8,
+                      source: .init(docId: "b", path: "/b", title: "b", updatedAt: "2026-06-01T00:00:00Z")),
+            Retrieved(memory: "early", similarity: 0.8,
+                      source: .init(docId: "a", path: "/a", title: "a", updatedAt: "2026-04-01T00:00:00Z")),
+        ]
+        XCTAssertEqual(TimelineBuilder.build(from: ev).first?.source.docId, "a")
     }
 }

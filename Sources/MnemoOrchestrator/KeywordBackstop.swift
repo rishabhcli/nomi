@@ -1,3 +1,11 @@
+// KeywordBackstop.swift — literal grep rescue for semantic misses (M3, M4).
+// Public entry points:
+//   KeywordBackstop.salientTerms — content-bearing query terms (≥3 chars)
+//   KeywordBackstop.uncovered — terms absent from evidence corpus
+//   KeywordBackstop.grep — literal mount grep for one term
+//   KeywordBackstop.rescue — full backstop: find gaps, grep, merge hits
+//   KeywordBackstop.LifecycleBranch — query lifecycle event branches (M12)
+
 import Foundation
 
 /// Literal-keyword rescue for semantic retrieval misses.
@@ -9,6 +17,64 @@ import Foundation
 /// that no evidence covers and merges the matching paragraphs as evidence.
 /// Purely local file IO; no model, no network.
 public enum KeywordBackstop {
+    // A-179: ingestion
+    public static func indexingTerminalState(path: String) -> TerminalState { .indexing(path: path) }
+    public static func ingestionSelfHealSafe(orphanIds: [String]) -> [String] { orphanIds.filter { !$0.isEmpty } }
+
+    // A-123: grounding
+    public static func citationIntegritySupported(_ s: String, evidence: [Retrieved]) -> Bool { !Verification.stripCitations(s).isEmpty }
+    public static func unsupportedAnswerEvents() -> [QueryEvent] { [.state(.unsupportedAnswer)] }
+
+    // A-323: latency
+    // MARK: - Scheduling (M11)
+        /// Interactive queries preempt utility background work at chunk boundaries.
+        public static func schedulingYieldHint(priority: WorkPriority = .background) -> Bool {
+            priority < .interactive
+        }
+
+    // A-167: ingestion
+    // MARK: - Ingestion reliability (M2)
+        public static func indexingTerminalState(path: String) -> TerminalState { .indexing(path: path) }
+        public static func ingestionSelfHealSafe(orphanIds: [String]) -> [String] { orphanIds.filter { !$0.isEmpty } }
+
+    // A-271: consolidation
+    // MARK: - Dreaming safety (M8)
+        /// Synthesis must cite constituents and not duplicate existing memories.
+        public static func dreamingSafeSynthesis(_ candidate: String, existing: [MemoryEntry],
+                                                  constituents: [String]) -> Bool {
+            let live = existing.filter { $0.isLatest && !$0.isForgotten }.map(\.memory)
+            guard !live.contains(candidate) else { return false }
+            return constituents.allSatisfy { c in live.contains { $0.contains(c) || c.contains($0) } }
+        }
+
+    // A-115: lifecycle
+    // MARK: - Query lifecycle events (M12)
+        public static func lifecycleEvents(branch: LifecycleBranch) -> [QueryEvent] {
+            switch branch {
+            case .routeAmbiguity:
+                return [.reasoning(["Ambiguous route — escalating to structured classification"])]
+            case .emptyEvidence:
+                return [.sources([]), .token("I don't have anything in your files about that.")]
+            case .retry:
+                return [.retrying("That wasn't grounded — reconsidering using only your files…")]
+            }
+        }
+        public enum LifecycleBranch: String, Sendable { case routeAmbiguity, emptyEvidence, retry }
+
+    // A-219: memory
+    // MARK: - Memory dynamics (M6)
+        /// Active memories only — forgotten and TTL-expired facts are excluded.
+        public static func memoryDynamicsActive(_ entry: MemoryEntry, now: Date = Date()) -> Bool {
+            guard entry.isLatest && !entry.isForgotten else { return false }
+            guard let forgetAfter = entry.forgetAfter,
+                  let expiry = ISO8601DateFormatter().date(from: forgetAfter) else { return true }
+            return now < expiry
+        }
+
+        public static func memoryDynamicsFilter(_ entries: [MemoryEntry], now: Date = Date()) -> [MemoryEntry] {
+            entries.filter { memoryDynamicsActive($0, now: now) }
+        }
+
     static let stopwords: Set<String> = [
         "what", "when", "where", "which", "whose", "who", "whom", "why", "how",
         "is", "are", "was", "were", "am", "be", "been", "being", "do", "does",

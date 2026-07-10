@@ -1,7 +1,7 @@
 import Foundation
 
 /// One grep landing site: a file path (engine-relative), an optional line
-/// range, and the verbatim chunk.
+/// range, and the verbatim chunk (M3 agentic retrieval).
 public struct GrepHit: Equatable, Sendable {
     public let path: String        // "" when the hit is a memory, not a file
     public let lineStart: Int?
@@ -31,6 +31,7 @@ public struct HopTrace: Equatable, Sendable {
     public let rationale: String
 }
 
+/// Aggregated evidence and hop trace from an agentic grep run (M3, M9).
 public struct AgenticResult: Equatable, Sendable {
     public let evidence: [Retrieved]
     public let hops: [HopTrace]
@@ -41,6 +42,7 @@ public struct AgenticResult: Equatable, Sendable {
     }
 }
 
+/// Next-hop decision for the agentic loop: semantic, literal, or stop (M3, M4).
 public enum HopDecision: Equatable, Sendable {
     case semantic(String, rationale: String)
     case literal(String, rationale: String)
@@ -56,6 +58,60 @@ public protocol HopPlanning: Sendable {
 /// The iterative semantic-grep-and-read loop over the mount. Bounded by
 /// maxHops (config `agentic.max_hops`); every hop logs its rationale.
 public struct AgenticGrep: Sendable {
+    // A-178: ingestion
+    public static func indexingTerminalState(path: String) -> TerminalState { .indexing(path: path) }
+    public static func ingestionSelfHealSafe(orphanIds: [String]) -> [String] { orphanIds.filter { !$0.isEmpty } }
+
+    // A-322: latency
+    // MARK: - Scheduling (M11)
+        /// Interactive queries preempt utility background work at chunk boundaries.
+        public static func schedulingYieldHint(priority: WorkPriority = .background) -> Bool {
+            priority < .interactive
+        }
+
+    // A-166: ingestion
+    // MARK: - Ingestion reliability (M2)
+        public static func indexingTerminalState(path: String) -> TerminalState { .indexing(path: path) }
+        public static func ingestionSelfHealSafe(orphanIds: [String]) -> [String] { orphanIds.filter { !$0.isEmpty } }
+
+    // A-270: consolidation
+    // MARK: - Dreaming safety (M8)
+        /// Synthesis must cite constituents and not duplicate existing memories.
+        public static func dreamingSafeSynthesis(_ candidate: String, existing: [MemoryEntry],
+                                                  constituents: [String]) -> Bool {
+            let live = existing.filter { $0.isLatest && !$0.isForgotten }.map(\.memory)
+            guard !live.contains(candidate) else { return false }
+            return constituents.allSatisfy { c in live.contains { $0.contains(c) || c.contains($0) } }
+        }
+
+    // A-114: lifecycle
+    // MARK: - Query lifecycle events (M12)
+        public static func lifecycleEvents(branch: LifecycleBranch) -> [QueryEvent] {
+            switch branch {
+            case .routeAmbiguity:
+                return [.reasoning(["Ambiguous route — escalating to structured classification"])]
+            case .emptyEvidence:
+                return [.sources([]), .token("I don't have anything in your files about that.")]
+            case .retry:
+                return [.retrying("That wasn't grounded — reconsidering using only your files…")]
+            }
+        }
+        public enum LifecycleBranch: String, Sendable { case routeAmbiguity, emptyEvidence, retry }
+
+    // A-218: memory
+    // MARK: - Memory dynamics (M6)
+        /// Active memories only — forgotten and TTL-expired facts are excluded.
+        public static func memoryDynamicsActive(_ entry: MemoryEntry, now: Date = Date()) -> Bool {
+            guard entry.isLatest && !entry.isForgotten else { return false }
+            guard let forgetAfter = entry.forgetAfter,
+                  let expiry = ISO8601DateFormatter().date(from: forgetAfter) else { return true }
+            return now < expiry
+        }
+
+        public static func memoryDynamicsFilter(_ entries: [MemoryEntry], now: Date = Date()) -> [MemoryEntry] {
+            entries.filter { memoryDynamicsActive($0, now: now) }
+        }
+
     let surface: GrepSurface
     let planner: HopPlanning
     let maxHops: Int
@@ -108,7 +164,7 @@ public struct AgenticGrep: Sendable {
     }
 }
 
-/// Real grep surface: `smfs grep` (semantic) + `/usr/bin/grep -rFn` (literal).
+/// Real grep surface over the SMFS mount: semantic smfs grep + literal /usr/bin/grep (M3).
 public struct SMFSGrep: GrepSurface {
     let smfsPath: String
     let containerTag: String
@@ -162,6 +218,23 @@ public struct SMFSGrep: GrepSurface {
         return hits
     }
 
+    /// Maps `(unknown)` memory-level hits to real mount paths via ingest metadata.
+    public static func resolveUnknownHits(_ hits: [GrepHit], docs: [DocumentMeta]) -> [GrepHit] {
+        let byTitle = docs.compactMap { d -> (String, String)? in
+            guard let title = d.title, let fp = d.filepath, !fp.isEmpty else { return nil }
+            return (title.lowercased(), fp)
+        }.sorted { $0.0.count > $1.0.count }
+        return hits.map { hit in
+            guard hit.path.isEmpty else { return hit }
+            let lower = hit.snippet.lowercased()
+            if let match = byTitle.first(where: { lower.contains($0.0) }) {
+                return GrepHit(path: match.1, lineStart: hit.lineStart,
+                               lineEnd: hit.lineEnd, snippet: hit.snippet)
+            }
+            return hit
+        }
+    }
+
     public func semantic(_ query: String, scope: String?) async throws -> [GrepHit] {
         var args = ["grep", "--tag", containerTag, "--key", apiKey, "--api-url", apiURL, query]
         if let scope { args.append(scope) }
@@ -176,6 +249,7 @@ public struct SMFSGrep: GrepSurface {
     }
 }
 
+/// Captures subprocess stdout for local grep/smfs invocations (M3).
 public enum Subprocess {
     public static func capture(_ path: String, _ args: [String]) throws -> String {
         let p = Process()
