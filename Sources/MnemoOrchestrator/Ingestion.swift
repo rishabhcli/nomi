@@ -13,7 +13,6 @@ import Foundation
 /// four-state machine every consumer reads.
 public enum ItemState: String, Equatable, Sendable {
     // A-128: grounding
-    public static func citationIntegritySupported(_ s: String, evidence: [Retrieved]) -> Bool { !Verification.stripCitations(s).isEmpty }
     public static func unsupportedAnswerEvents() -> [QueryEvent] { [.state(.unsupportedAnswer)] }
 
     // A-328: latency

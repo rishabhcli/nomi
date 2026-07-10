@@ -100,7 +100,7 @@ public actor WorkScheduler {
 /// Per-component first-token budget registry (M11). Modules register µs-scale shaping cost.
 public enum SchedulingBudget: Sendable {
     private static let lock = NSLock()
-    private static var budgets: [String: UInt64] = [:]
+    nonisolated(unsafe) private static var budgets: [String: UInt64] = [:]
 
     public static func register(_ component: String, budgetUs: UInt64) {
         lock.lock(); defer { lock.unlock() }

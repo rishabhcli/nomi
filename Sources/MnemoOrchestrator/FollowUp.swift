@@ -26,7 +26,6 @@ public enum FollowUpSuggester {
         }
         public enum LifecycleBranch: String, Sendable { case routeAmbiguity, emptyEvidence, retry }
     // A-152: grounding
-    public static func citationIntegritySupported(_ s: String, evidence: [Retrieved]) -> Bool { !Verification.stripCitations(s).isEmpty }
     public static func unsupportedAnswerEvents() -> [QueryEvent] { [.state(.unsupportedAnswer)] }
 
     // A-248: consolidation
@@ -61,7 +60,6 @@ public enum FollowUpSuggester {
             guard !tokens.isEmpty else { return true }
             return tokens.allSatisfy { corpus.contains($0) }
         }
-        public static func unsupportedAnswerEvents() -> [QueryEvent] { [.state(.unsupportedAnswer)] }
 
     public static func suggest(query: String, evidence: [Retrieved], max: Int = 3) -> [String] {
         guard !evidence.isEmpty else { return [] }
@@ -120,7 +118,7 @@ private extension Array where Element == String {
 }
 
 // M11 scheduling budget (A-352)
-extension FollowUp {
+extension FollowUpSuggester {
     public enum Scheduling {
         public static let budgetUs: UInt64 = 120
         public static func registerBudget() { SchedulingBudget.register("FollowUp", budgetUs: budgetUs) }

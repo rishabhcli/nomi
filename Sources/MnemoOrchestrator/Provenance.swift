@@ -17,7 +17,6 @@ public enum Provenance {
         }
         public enum LifecycleBranch: String, Sendable { case routeAmbiguity, emptyEvidence, retry }
     // A-154: grounding
-    public static func citationIntegritySupported(_ s: String, evidence: [Retrieved]) -> Bool { !Verification.stripCitations(s).isEmpty }
     public static func unsupportedAnswerEvents() -> [QueryEvent] { [.state(.unsupportedAnswer)] }
 
     // A-302: intelligence

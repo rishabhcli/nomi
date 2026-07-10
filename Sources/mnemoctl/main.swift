@@ -519,7 +519,7 @@ case "suggest":
 case "route":
     let q = CommandLine.arguments.dropFirst(2).joined(separator: " ")
     guard !q.isEmpty else { print("usage: mnemoctl route <query>"); exit(64) }
-    let intent = Router.route(q)
+    let intent = HeuristicRouter().classify(q).intent
     print("intent=\(intent)")
 case "escalate":
     // AT-M* headless probe for RouterEscalator (offline, loopback-only when engine needed).
@@ -571,7 +571,7 @@ case "scheduler":
     let token = await sched.beginInteractive()
     print("interactiveInFlight yield=\(await sched.shouldBackgroundYield)")
     await sched.endInteractive(token)
-    print("components=\(SchedulingBudget.registeredComponents().joined(separator: \", \")) totalUs=\(SchedulingBudget.totalRegisteredUs())")
+    print("components=\(SchedulingBudget.registeredComponents().joined(separator: ", ")) totalUs=\(SchedulingBudget.totalRegisteredUs())")
 case "notch-state":
     // AT-M* headless probe for NotchReducer (offline, loopback-only when engine needed).
     print("NotchReducer: ok (mnemoctl notch-state registered — invoke module APIs in tests)")
@@ -581,7 +581,7 @@ case "decompose":
 case "scope-classify":
     let q = CommandLine.arguments.dropFirst(2).joined(separator: " ")
     guard !q.isEmpty else { print("usage: mnemoctl scope-classify <query>"); exit(64) }
-    let intent = ScopeClassifier.classify(q)
+    let intent = ScopeClassifier.isCorpusQuestion(q) ? "corpus" : "chit-chat"
     print("intent=\(intent)")
 case "effort":
     // AT-M* headless probe for AdaptiveEffort (offline, loopback-only when engine needed).

@@ -1,10 +1,11 @@
+import Foundation
+
 // A-014 audit: no info-level logging in this file — document text flows only
 // into composed prompts for generation, never into log output.
 // Verified: no Logger/os_log calls; context() formats evidence for the model only.
 
 public enum Prompt {
     // A-126: grounding
-    public static func citationIntegritySupported(_ s: String, evidence: [Retrieved]) -> Bool { !Verification.stripCitations(s).isEmpty }
     public static func unsupportedAnswerEvents() -> [QueryEvent] { [.state(.unsupportedAnswer)] }
 
     // A-326: latency

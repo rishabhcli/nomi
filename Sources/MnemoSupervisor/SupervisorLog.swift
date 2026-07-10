@@ -32,6 +32,7 @@ public enum SupervisorLogAggregator {
             timestamp: ISO8601DateFormatter().string(from: Date())
         )
     }
+}
 
 extension SupervisorLogAggregator.Bundle: Codable {
     public func jsonLine() throws -> String {

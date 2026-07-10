@@ -53,7 +53,7 @@ public struct QueryLogTracker: Sendable {
         return entry.redacted()
     }
 
-    public func emit(to sink: QueryLogSink, egressBlockedCount: Int = 0) async {
+    public mutating func emit(to sink: QueryLogSink, egressBlockedCount: Int = 0) async {
         let final = finalize(egressBlockedCount: egressBlockedCount)
         await sink.emit(final)
     }

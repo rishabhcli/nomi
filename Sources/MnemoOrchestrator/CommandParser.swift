@@ -52,7 +52,6 @@ public enum CommandParser {
         }
 
     // A-155: grounding
-    public static func citationIntegritySupported(_ s: String, evidence: [Retrieved]) -> Bool { !Verification.stripCitations(s).isEmpty }
     public static func unsupportedAnswerEvents() -> [QueryEvent] { [.state(.unsupportedAnswer)] }
 
     // A-147: grounding
@@ -65,7 +64,6 @@ public enum CommandParser {
             guard !tokens.isEmpty else { return true }
             return tokens.allSatisfy { corpus.contains($0) }
         }
-        public static func unsupportedAnswerEvents() -> [QueryEvent] { [.state(.unsupportedAnswer)] }
 
     // A-251: consolidation
     // MARK: - Dreaming safety (M8)

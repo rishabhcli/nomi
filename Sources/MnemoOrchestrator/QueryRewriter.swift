@@ -49,8 +49,6 @@ public struct LLMQueryRewriter: QueryRewriting {
 
     // A-185: ingestion
     // MARK: - Ingestion reliability (M2)
-        public static func indexingTerminalState(path: String) -> TerminalState { .indexing(path: path) }
-        public static func ingestionSelfHealSafe(orphanIds: [String]) -> [String] { orphanIds.filter { !$0.isEmpty } }
 
     // A-133: grounding
     // MARK: - Citation integrity (M5)

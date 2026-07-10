@@ -28,8 +28,6 @@ public enum ConflictDetector {
 
     // A-177: ingestion
     // MARK: - Ingestion reliability (M2)
-        public static func indexingTerminalState(path: String) -> TerminalState { .indexing(path: path) }
-        public static func ingestionSelfHealSafe(orphanIds: [String]) -> [String] { orphanIds.filter { !$0.isEmpty } }
 
     // A-281: intelligence
     // MARK: - Expressiveness (beats-Siri offline)

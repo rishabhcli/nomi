@@ -239,7 +239,7 @@ public struct QueryService: QueryServing {
     }
 
     public func ask(_ q0: String, history: [Turn] = []) -> AsyncThrowingStream<QueryEvent, Error> {
-        AsyncThrowingStream { continuation in
+        AsyncThrowingStream(QueryEvent.self) { continuation in
             let task = Task {
                 var tracker = QueryLogTracker(modelId: modelId)
                 do {

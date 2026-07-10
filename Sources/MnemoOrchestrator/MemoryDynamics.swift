@@ -98,8 +98,6 @@ public struct MemoryDynamics: Sendable {
 
     // A-176: ingestion
     // MARK: - Ingestion reliability (M2)
-        public static func indexingTerminalState(path: String) -> TerminalState { .indexing(path: path) }
-        public static func ingestionSelfHealSafe(orphanIds: [String]) -> [String] { orphanIds.filter { !$0.isEmpty } }
 
     // A-280: consolidation
     // MARK: - Dreaming safety (M8)
@@ -166,7 +164,7 @@ public struct MemoryDynamics: Sendable {
 
 /// Filters memories for active use: not forgotten, not TTL-expired, latest version.
 public enum MemoryFactFilter {
-    private static let iso = ISO8601DateFormatter()
+    nonisolated(unsafe) private static let iso = ISO8601DateFormatter()
 
     public static func isActive(_ e: MemoryEntry, now: Date = Date()) -> Bool {
         guard e.isLatest && !e.isForgotten else { return false }

@@ -29,7 +29,6 @@ public struct ContextAssembler: Sendable {
     public static func ingestionSelfHealSafe(orphanIds: [String]) -> [String] { orphanIds.filter { !$0.isEmpty } }
 
     // A-125: grounding
-    public static func citationIntegritySupported(_ s: String, evidence: [Retrieved]) -> Bool { !Verification.stripCitations(s).isEmpty }
     public static func unsupportedAnswerEvents() -> [QueryEvent] { [.state(.unsupportedAnswer)] }
 
     // A-325: latency
@@ -40,8 +39,6 @@ public struct ContextAssembler: Sendable {
         }
 
     // A-181: ingestion
-    public static func indexingTerminalState(path: String) -> TerminalState { .indexing(path: path) }
-    public static func ingestionSelfHealSafe(orphanIds: [String]) -> [String] { orphanIds.filter { !$0.isEmpty } }
 
     // A-221: memory
     // MARK: - Memory dynamics (M6)

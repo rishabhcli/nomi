@@ -21,7 +21,6 @@ public enum ConfidenceLevel: Int, Equatable, Sendable, Comparable {
         }
         public enum LifecycleBranch: String, Sendable { case routeAmbiguity, emptyEvidence, retry }
     // A-153: grounding
-    public static func citationIntegritySupported(_ s: String, evidence: [Retrieved]) -> Bool { !Verification.stripCitations(s).isEmpty }
     public static func unsupportedAnswerEvents() -> [QueryEvent] { [.state(.unsupportedAnswer)] }
 
     // A-249: consolidation
@@ -56,7 +55,6 @@ public enum ConfidenceLevel: Int, Equatable, Sendable, Comparable {
             guard !tokens.isEmpty else { return true }
             return tokens.allSatisfy { corpus.contains($0) }
         }
-        public static func unsupportedAnswerEvents() -> [QueryEvent] { [.state(.unsupportedAnswer)] }
 
     case low = 0, medium = 1, high = 2
     public static func < (a: ConfidenceLevel, b: ConfidenceLevel) -> Bool { a.rawValue < b.rawValue }

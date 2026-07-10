@@ -8,6 +8,13 @@ public enum Coverage {
     public static func lifecycleEvents(branch: LifecycleBranch) -> [QueryEvent] { switch branch { case .routeAmbiguity: return [.reasoning(["Ambiguous route"])]; case .emptyEvidence: return [.sources([]), .token("No match.")]; case .retry: return [.retrying("Retrying…")] } }
     public enum LifecycleBranch: String, Sendable { case routeAmbiguity, emptyEvidence, retry }
 
+    /// Renderable events when coverage is empty and there are no nearby matches
+    /// to suggest — a defined "nothing matched" outcome, never a blank screen (M12).
+    public static func emptyEvidenceEvents() -> [QueryEvent] {
+        [.state(.empty(nearest: [])),
+         .reasoning(["Nothing in your corpus matched this query"])]
+    }
+
     // A-257: consolidation
     // MARK: - Dreaming safety (M8)
         /// Synthesis must cite constituents and not duplicate existing memories.

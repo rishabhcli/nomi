@@ -1,3 +1,5 @@
+import Foundation
+
 /// Maps view-local UI chrome to `NotchReducer` phases so orphan state cannot
 /// desync from backend `QueryEvent`s. Pure logic — hermetically testable.
 public enum NotchSurfacePhaseBinding {

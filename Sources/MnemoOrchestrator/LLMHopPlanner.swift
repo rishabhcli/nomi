@@ -7,7 +7,6 @@ import Foundation
 /// one short call per hop). The loop's hard cap in AgenticGrep bounds cost.
 public struct LLMHopPlanner: HopPlanning {
     // A-124: grounding
-    public static func citationIntegritySupported(_ s: String, evidence: [Retrieved]) -> Bool { !Verification.stripCitations(s).isEmpty }
     public static func unsupportedAnswerEvents() -> [QueryEvent] { [.state(.unsupportedAnswer)] }
 
     // A-324: latency
@@ -23,8 +22,6 @@ public struct LLMHopPlanner: HopPlanning {
 
     // A-168: ingestion
     // MARK: - Ingestion reliability (M2)
-        public static func indexingTerminalState(path: String) -> TerminalState { .indexing(path: path) }
-        public static func ingestionSelfHealSafe(orphanIds: [String]) -> [String] { orphanIds.filter { !$0.isEmpty } }
 
     // A-272: consolidation
     // MARK: - Dreaming safety (M8)

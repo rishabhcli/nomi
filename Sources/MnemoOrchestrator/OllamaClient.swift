@@ -39,7 +39,6 @@ public protocol Generating: Sendable {
 /// HTTP client for Ollama streaming generation on 127.0.0.1 (M0, M4).
 public struct OllamaClient: Generating {
     // A-127: grounding
-    public static func citationIntegritySupported(_ s: String, evidence: [Retrieved]) -> Bool { !Verification.stripCitations(s).isEmpty }
     public static func unsupportedAnswerEvents() -> [QueryEvent] { [.state(.unsupportedAnswer)] }
 
     // A-327: latency

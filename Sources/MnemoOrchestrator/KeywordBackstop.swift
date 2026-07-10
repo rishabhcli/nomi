@@ -22,7 +22,6 @@ public enum KeywordBackstop {
     public static func ingestionSelfHealSafe(orphanIds: [String]) -> [String] { orphanIds.filter { !$0.isEmpty } }
 
     // A-123: grounding
-    public static func citationIntegritySupported(_ s: String, evidence: [Retrieved]) -> Bool { !Verification.stripCitations(s).isEmpty }
     public static func unsupportedAnswerEvents() -> [QueryEvent] { [.state(.unsupportedAnswer)] }
 
     // A-323: latency
@@ -34,8 +33,6 @@ public enum KeywordBackstop {
 
     // A-167: ingestion
     // MARK: - Ingestion reliability (M2)
-        public static func indexingTerminalState(path: String) -> TerminalState { .indexing(path: path) }
-        public static func ingestionSelfHealSafe(orphanIds: [String]) -> [String] { orphanIds.filter { !$0.isEmpty } }
 
     // A-271: consolidation
     // MARK: - Dreaming safety (M8)

@@ -54,7 +54,6 @@ public enum ResponseTone: String, Equatable, Sendable, CaseIterable {
 /// Composes the per-answer formatting directive appended to the system prompt.
 public enum ResponseStyle {
     // A-151: grounding
-    public static func citationIntegritySupported(_ s: String, evidence: [Retrieved]) -> Bool { !Verification.stripCitations(s).isEmpty }
     public static func unsupportedAnswerEvents() -> [QueryEvent] { [.state(.unsupportedAnswer)] }
 
     // A-247: consolidation
@@ -89,7 +88,6 @@ public enum ResponseStyle {
             guard !tokens.isEmpty else { return true }
             return tokens.allSatisfy { corpus.contains($0) }
         }
-        public static func unsupportedAnswerEvents() -> [QueryEvent] { [.state(.unsupportedAnswer)] }
 
     public static func directive(shape: AnswerShape, tone: ResponseTone) -> String {
         let shapeText: String

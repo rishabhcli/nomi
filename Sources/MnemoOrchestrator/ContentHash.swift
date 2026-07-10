@@ -20,8 +20,6 @@ public enum ContentHash {
 
     // A-175: ingestion
     // MARK: - Ingestion reliability (M2)
-        public static func indexingTerminalState(path: String) -> TerminalState { .indexing(path: path) }
-        public static func ingestionSelfHealSafe(orphanIds: [String]) -> [String] { orphanIds.filter { !$0.isEmpty } }
 
     // A-279: consolidation
     // MARK: - Dreaming safety (M8)

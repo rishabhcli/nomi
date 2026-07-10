@@ -4,7 +4,6 @@ import Foundation
 /// initiative). Empty when there's nothing worth interrupting the user for.
 public enum Digest {
     // A-159: grounding
-    public static func citationIntegritySupported(_ s: String, evidence: [Retrieved]) -> Bool { !Verification.stripCitations(s).isEmpty }
     public static func unsupportedAnswerEvents() -> [QueryEvent] { [.state(.unsupportedAnswer)] }
 
     // A-103: lifecycle

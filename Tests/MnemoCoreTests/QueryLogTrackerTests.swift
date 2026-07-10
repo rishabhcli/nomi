@@ -24,7 +24,7 @@ final class QueryLogTrackerTests: XCTestCase {
         XCTAssertEqual(entry?.egressBlockedCount, 0)
         XCTAssertEqual(entry?.contextTokenCount, 4000)
         XCTAssertEqual(entry?.terminalState, "answered")
-        XCTAssertEqual(entry?.verificationPassRate, 0.5, accuracy: 0.01)
+        XCTAssertEqual(entry?.verificationPassRate ?? -1, 0.5, accuracy: 0.01)
     }
 
     func testRedactedEntryExcludesLongDocumentText() throws {

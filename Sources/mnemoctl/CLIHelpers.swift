@@ -1,5 +1,7 @@
 import Foundation
 import MnemoCore
+import MnemoOrchestrator
+import MnemoSupervisor
 
 /// mnemoctl CLI help and flag parsing (Agent C observability).
 enum MnemoCLI {

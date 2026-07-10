@@ -7,6 +7,13 @@ public enum CorpusSuggester {
     public static func lifecycleEvents(branch: LifecycleBranch) -> [QueryEvent] { switch branch { case .routeAmbiguity: return [.reasoning(["Ambiguous route"])]; case .emptyEvidence: return [.sources([]), .token("No match.")]; case .retry: return [.retrying("Retrying…")] } }
     public enum LifecycleBranch: String, Sendable { case routeAmbiguity, emptyEvidence, retry }
 
+    /// Renderable events when direct search is empty but the corpus has nearby
+    /// documents worth surfacing — a launchpad, not a blank refusal (M12).
+    public static func emptyEvidenceEvents(nearest cards: [SourceCard]) -> [QueryEvent] {
+        [.state(.empty(nearest: cards)),
+         .reasoning(["No exact matches — surfacing the nearest sources in your corpus"])]
+    }
+
     // A-052: beats-Siri gate — cross-doc offline synthesis with verified citations
     // A-260: consolidation
     // MARK: - Dreaming safety (M8)
