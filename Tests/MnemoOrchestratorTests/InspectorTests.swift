@@ -138,7 +138,8 @@ final class InspectorLoggingAuditTests: XCTestCase {
         let path = NSTemporaryDirectory() + "suppress-\(UUID().uuidString).json"
         let ledger = SuppressionLedger(path: path)
         await ledger.suppress("User prefers Bazel build tool")
-        XCTAssertTrue(await ledger.isSuppressed("user prefers bazel build tool"))
+        let suppressed = await ledger.isSuppressed("user prefers bazel build tool")
+        XCTAssertTrue(suppressed)
         try? FileManager.default.removeItem(atPath: path)
     }
 }
@@ -221,6 +222,7 @@ final class LexicalContradictionExtendedTests: XCTestCase {
                                       isLatest: true, isForgotten: false, isStatic: false,
                                       parentMemoryId: nil, rootMemoryId: "m1",
                                       forgetAfter: nil, forgetReason: nil, history: [])]
-        XCTAssertEqual(await det.supersededFact(byNew: "Project started on June 2.", among: candidates), "m1")
+        let superseded = await det.supersededFact(byNew: "Project started on June 2.", among: candidates)
+        XCTAssertEqual(superseded, "m1")
     }
 }

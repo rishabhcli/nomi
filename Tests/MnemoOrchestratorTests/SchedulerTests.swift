@@ -67,11 +67,11 @@ final class WorkSchedulerTests: XCTestCase {
 
     /// A-352: FollowUp registers M11 first-token budget and yields to interactive.
     func testFollowUpSchedulingBudgetA352() async {
-        FollowUp.Scheduling.registerBudget()
+        FollowUpSuggester.Scheduling.registerBudget()
         XCTAssertEqual(SchedulingBudget.budgetUs(for: "FollowUp"), 120)
         let sched = WorkScheduler()
         let token = await sched.beginInteractive()
-        await FollowUp.Scheduling.yieldIfInteractiveWaiting(sched)
+        await FollowUpSuggester.Scheduling.yieldIfInteractiveWaiting(sched)
         await sched.endInteractive(token)
     }
 

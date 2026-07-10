@@ -88,7 +88,7 @@ final class SyncEngineTests: XCTestCase {
 }
 
 /// A-011: KeywordBackstop salientTerms filters stopwords and short tokens.
-final class KeywordBackstopTests: XCTestCase {
+final class KeywordBackstopAuditTests: XCTestCase {
     func testSalientTermsFiltersStopwords() {
         let terms = KeywordBackstop.salientTerms("what is the chrome browser status")
         XCTAssertTrue(terms.contains("chrome"))

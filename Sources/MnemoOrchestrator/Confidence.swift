@@ -88,6 +88,22 @@ public enum Confidence {
         case .low: return "Loosely inferred; I'm not confident this is in your files."
         }
     }
+
+    // Test-support shims: regression tests reference these on `Confidence`;
+    // forward to the identical implementations on ConfidenceLevel.
+    public static func unsupportedAnswerEvents() -> [QueryEvent] { ConfidenceLevel.unsupportedAnswerEvents() }
+    public static func citationIntegritySupported(_ sentence: String, evidence: [Retrieved]) -> Bool {
+        ConfidenceLevel.citationIntegritySupported(sentence, evidence: evidence)
+    }
+    public static func expressivenessShape(_ items: [String], as shape: AnswerShape) -> String {
+        ConfidenceLevel.expressivenessShape(items, as: shape)
+    }
+    public static func dreamingSafeSynthesis(_ candidate: String, existing: [MemoryEntry], constituents: [String]) -> Bool {
+        ConfidenceLevel.dreamingSafeSynthesis(candidate, existing: existing, constituents: constituents)
+    }
+    public static func lifecycleEvents(branch: ConfidenceLevel.LifecycleBranch) -> [QueryEvent] {
+        ConfidenceLevel.lifecycleEvents(branch: branch)
+    }
 }
 
 // M11 scheduling budget (A-353)

@@ -56,6 +56,9 @@ public enum ResponseStyle {
     // A-151: grounding
     public static func unsupportedAnswerEvents() -> [QueryEvent] { [.state(.unsupportedAnswer)] }
 
+    /// Test-support shim: forward to AnswerShape's lifecycle events (regression tests).
+    public static func lifecycleEvents(branch: AnswerShape.LifecycleBranch) -> [QueryEvent] { AnswerShape.lifecycleEvents(branch: branch) }
+
     // A-247: consolidation
     // MARK: - Dreaming safety (M8)
         /// Synthesis must cite constituents and not duplicate existing memories.

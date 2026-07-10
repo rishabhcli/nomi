@@ -151,7 +151,8 @@ final class WorkSchedulerAuditTests: XCTestCase {
     func testBackgroundYieldsHintDuringInteractive() async {
         let sched = WorkScheduler()
         let token = await sched.beginInteractive()
-        XCTAssertTrue(await sched.shouldBackgroundYield)
+        let yieldHint = await sched.shouldBackgroundYield
+        XCTAssertTrue(yieldHint)
         await sched.endInteractive(token)
     }
 }

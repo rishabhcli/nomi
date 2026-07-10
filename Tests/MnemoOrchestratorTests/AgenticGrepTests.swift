@@ -212,7 +212,7 @@ final class A153RegressionTests: XCTestCase { func testA153_x() { XCTAssertEqual
 
 final class A95RegressionTests: XCTestCase {
     func testA95_lifecycleEventsRenderable() {
-        let events = CommandParser.lifecycleEvents(branch: .routeAmbiguity)
+        let events = CommandParser.lifecycleEvents(branch: Command.LifecycleBranch.routeAmbiguity)
         XCTAssertFalse(events.isEmpty)
         var state = NotchState(phase: .input, query: "q95", answer: "", sources: [])
         for e in events { state = NotchReducer.apply(e, to: state) }

@@ -150,7 +150,7 @@ final class A178RegressionTests: XCTestCase { func testA178_x() { XCTAssertEqual
 
 final class A91RegressionTests: XCTestCase {
     func testA91_lifecycleEventsRenderable() {
-        let events = ResponseStyle.lifecycleEvents(branch: .retry)
+        let events = ResponseStyle.lifecycleEvents(branch: AnswerShape.LifecycleBranch.retry)
         XCTAssertFalse(events.isEmpty)
         var state = NotchState(phase: .input, query: "q91", answer: "", sources: [])
         for e in events { state = NotchReducer.apply(e, to: state) }

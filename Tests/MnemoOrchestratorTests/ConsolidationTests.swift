@@ -151,7 +151,7 @@ final class ContextAssemblerInvariantTests: XCTestCase {
     func testAssembleUsesProfileAndEvidenceOnly() {
         let ctx = ContextAssembler(tokenBudget: 1000).assemble(
             intent: .lookup, question: "q",
-            profile: Profile(statics: ["likes Bazel"], dynamics: []),
+            profile: Profile(statics: ["likes Bazel"], dynamics: [], memories: []),
             evidence: [Retrieved(memory: "evidence text", similarity: 0.9,
                                  source: .init(docId: "d", path: "/p", title: "t"))])
         XCTAssertTrue(ctx.preamble.contains("Bazel"))
@@ -252,7 +252,8 @@ final class SuppressionFuzzyKeyTests: XCTestCase {
         let path = NSTemporaryDirectory() + "suppress-\(UUID().uuidString).json"
         let ledger = SuppressionLedger(path: path)
         await ledger.suppress("User prefers the Bazel build tool.")
-        XCTAssertTrue(await ledger.isSuppressed("User prefers Bazel build tool"))
+        let suppressed = await ledger.isSuppressed("User prefers Bazel build tool")
+        XCTAssertTrue(suppressed)
         try? FileManager.default.removeItem(atPath: path)
     }
 }

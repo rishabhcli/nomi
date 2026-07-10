@@ -203,7 +203,8 @@ final class BulkIngestUnderLoadIntegrationTests: XCTestCase {
     func testH0009_backgroundWorkYieldsToInteractive() async {
         let sched = WorkScheduler()
         let token = await sched.beginInteractive()
-        XCTAssertTrue(await sched.shouldBackgroundYield,
+        let yieldHint = await sched.shouldBackgroundYield
+        XCTAssertTrue(yieldHint,
                       "background ingest must yield while an interactive query is in flight")
         await sched.endInteractive(token)
     }

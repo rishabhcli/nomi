@@ -1024,21 +1024,3 @@ final class SelfHealExemptionTests: XCTestCase {
         XCTAssertEqual(SelfHeal.orphanedMemoryIds(memories: memories, liveDocIds: []), ["orphan"])
     }
 }
-
-/// A-041: source-less syntheses and static facts survive orphan GC.
-final class SelfHealExemptionTests: XCTestCase {
-    func testSourcelessStaticAndSynthesisExempt() {
-        let memories = [
-            MemoryEntry(id: "static", memory: "Manual fact.", version: 1, isLatest: true, isForgotten: false,
-                        isStatic: true, parentMemoryId: nil, rootMemoryId: "static",
-                        forgetAfter: nil, forgetReason: nil, history: [], documentIds: []),
-            MemoryEntry(id: "syn", memory: "Synthesis.", version: 1, isLatest: true, isForgotten: false,
-                        isStatic: false, parentMemoryId: "p", rootMemoryId: "syn",
-                        forgetAfter: nil, forgetReason: nil, history: [], documentIds: []),
-            MemoryEntry(id: "orphan", memory: "gone", version: 1, isLatest: true, isForgotten: false,
-                        isStatic: false, parentMemoryId: nil, rootMemoryId: "orphan",
-                        forgetAfter: nil, forgetReason: nil, history: [], documentIds: []),
-        ]
-        XCTAssertEqual(SelfHeal.orphanedMemoryIds(memories: memories, liveDocIds: []), ["orphan"])
-    }
-}

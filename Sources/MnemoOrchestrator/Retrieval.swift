@@ -3,7 +3,7 @@ import Foundation
 /// Locates the cited span inside a source document. Char offsets are resolved
 /// against the document's extracted text (see `CharSpan`); they are real,
 /// checkable positions — never fabricated. `nil` means "not yet resolved".
-public struct SourceLocator: Equatable, Sendable {
+public struct SourceLocator: Equatable, Sendable, Codable {
     public let docId: String
     public let path: String       // engine-relative filepath ("/notes/x.md"), "" if unknown
     public let title: String
@@ -18,6 +18,11 @@ public struct SourceLocator: Equatable, Sendable {
         self.charStart = charStart
         self.charEnd = charEnd
         self.updatedAt = updatedAt
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case docId = "doc_id", path, title
+        case charStart = "char_start", charEnd = "char_end", updatedAt = "updated_at"
     }
 }
 

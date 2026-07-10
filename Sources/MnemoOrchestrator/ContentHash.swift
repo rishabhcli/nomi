@@ -45,6 +45,11 @@ public enum ContentHash {
             entries.filter { memoryDynamicsActive($0, now: now) }
         }
 
+    /// Hex sha256 of raw bytes (never logs the bytes) — log-redaction identity.
+    public static func sha256Hex(of data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
     /// Streaming sha256 (fixed 1 MiB windows; never loads the whole file).
     public static func sha256(of url: URL) throws -> String {
         let handle = try FileHandle(forReadingFrom: url)

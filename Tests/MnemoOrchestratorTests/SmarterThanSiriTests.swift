@@ -181,7 +181,7 @@ final class B54Tests: XCTestCase {
 
 // A-055
 final class B55Tests: XCTestCase {
- func testA55_gate() async throws { XCTAssertEqual(await LLMRouterEscalator(generator:FakeGenerator(tokens:["multihop"])).classify("compare April June"),.multihop) }
+ func testA55_gate() async throws { let r = await LLMRouterEscalator(generator:FakeGenerator(tokens:["multihop"])).classify("compare April June"); XCTAssertEqual(r,.multihop) }
 }
 
 // A-056
@@ -206,7 +206,7 @@ final class B59Tests: XCTestCase {
 
 // A-060
 final class B60Tests: XCTestCase {
- func testA60_gate() async throws { XCTAssertEqual((await SpanResolver(docs:FakeDocsStore(records:["ta":DocumentRecord(content:"May 5",filepath:"/a.md")])).resolve([BeatsSiriFixtures.timelineA])).count,1) }
+ func testA60_gate() async throws { let r = await SpanResolver(docs:FakeDocsStore(records:["ta":DocumentRecord(content:"May 5",filepath:"/a.md")])).resolve([BeatsSiriFixtures.timelineA]); XCTAssertEqual(r.count,1) }
 }
 
 // A-061
@@ -226,7 +226,7 @@ final class B63Tests: XCTestCase {
 
 // A-064
 final class B64Tests: XCTestCase {
- func testA64_gate() async throws { XCTAssertEqual(await LLMHopPlanner(generator:FakeGenerator(tokens:["stop"])).nextHop(question:"q",evidence:[],hops:[]),.stop(rationale:"planner output unparseable")) }
+ func testA64_gate() async throws { let r = await LLMHopPlanner(generator:FakeGenerator(tokens:["stop"])).nextHop(question:"q",evidence:[],hops:[]); XCTAssertEqual(r,.stop(rationale:"planner output unparseable")) }
 }
 
 // A-065
@@ -251,7 +251,7 @@ final class B68Tests: XCTestCase {
 
 // A-069
 final class B69Tests: XCTestCase {
- func testA69_gate() async throws { XCTAssertTrue(await IngestGate(retriever:FakeRetriever(hitsByMode:["memories":[BeatsSiriFixtures.timelineA]])).waitUntilSearchable(probe:"Aurora",timeout:.milliseconds(50))) }
+ func testA69_gate() async throws { let ok = await IngestGate(retriever:FakeRetriever(hitsByMode:["memories":[BeatsSiriFixtures.timelineA]])).waitUntilSearchable(probe:"Aurora",timeout:.milliseconds(50)); XCTAssertTrue(ok) }
 }
 
 // A-070
@@ -281,12 +281,12 @@ final class B74Tests: XCTestCase {
 
 // A-075
 final class B75Tests: XCTestCase {
- func testA75_gate() async throws { XCTAssertEqual(await LLMSynthesizer(generator:FakeGenerator(tokens:["S."])).synthesize([MemoryEntry(id:"a",memory:"a",version:1,isLatest:true,isForgotten:false,isStatic:false,parentMemoryId:nil,rootMemoryId:"a",forgetAfter:nil,forgetReason:nil,history:[]),MemoryEntry(id:"b",memory:"b",version:1,isLatest:true,isForgotten:false,isStatic:false,parentMemoryId:nil,rootMemoryId:"b",forgetAfter:nil,forgetReason:nil,history:[])]),"S.") }
+ func testA75_gate() async throws { let s = await LLMSynthesizer(generator:FakeGenerator(tokens:["S."])).synthesize([MemoryEntry(id:"a",memory:"a",version:1,isLatest:true,isForgotten:false,isStatic:false,parentMemoryId:nil,rootMemoryId:"a",forgetAfter:nil,forgetReason:nil,history:[]),MemoryEntry(id:"b",memory:"b",version:1,isLatest:true,isForgotten:false,isStatic:false,parentMemoryId:nil,rootMemoryId:"b",forgetAfter:nil,forgetReason:nil,history:[])]); XCTAssertEqual(s,"S.") }
 }
 
 // A-076
 final class B76Tests: XCTestCase {
- func testA76_gate() async throws { let p=FileManager.default.temporaryDirectory.appendingPathComponent("s.json").path;let l=SuppressionLedger(path:p);await l.suppress("x");XCTAssertTrue(await l.isSuppressed("x")) }
+ func testA76_gate() async throws { let p=FileManager.default.temporaryDirectory.appendingPathComponent("s.json").path;let l=SuppressionLedger(path:p);await l.suppress("x");let ok=await l.isSuppressed("x");XCTAssertTrue(ok) }
 }
 
 // A-077

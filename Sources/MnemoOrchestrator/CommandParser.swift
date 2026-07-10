@@ -35,6 +35,8 @@ public enum ParsedInput: Equatable, Sendable {
 }
 
 public enum CommandParser {
+    /// Test-support shim: forward to Command's lifecycle events (regression tests).
+    public static func lifecycleEvents(branch: Command.LifecycleBranch) -> [QueryEvent] { Command.lifecycleEvents(branch: branch) }
     // A-199: ingestion
     public static func indexingTerminalState(path: String) -> TerminalState { .indexing(path: path) }
     public static func ingestionSelfHealSafe(orphanIds: [String]) -> [String] { orphanIds.filter { !$0.isEmpty } }

@@ -131,7 +131,8 @@ final class QueryServiceTests: XCTestCase {
                               recorder: recorder)
         var events: [QueryEvent] = []
         for try await e in svc.ask("hi") { events.append(e) }
-        XCTAssertEqual(await recorder.requests.count, 0, "chit-chat must not search")
+        let reqCount = await recorder.requests.count
+        XCTAssertEqual(reqCount, 0, "chit-chat must not search")
         XCTAssertFalse(events.contains { if case .sources = $0 { true } else { false } })
         let text = events.compactMap { if case let .token(t) = $0 { t } else { nil } }.joined()
         XCTAssertFalse(text.contains("GENERATED"))

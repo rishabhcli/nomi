@@ -113,6 +113,6 @@ final class A97RegressionTests: XCTestCase {
 /// A-039 audit: ResponseStyle infers shape without logging document text.
 final class ResponseStyleLoggingAuditTests: XCTestCase {
     func testDetectsTimelineShape() {
-        XCTAssertEqual(ResponseStyle.detect(query: "when did each milestone happen?", intent: .synthesis), .timeline)
+        XCTAssertEqual(AnswerShape.detect(query: "when did each milestone happen?", intent: .synthesis), .timeline)
     }
 }

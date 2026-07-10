@@ -243,15 +243,20 @@ final class G0005EgressGuardTests: XCTestCase {
         let g = EgressGuard()
         let w1 = await g.beginQueryWindow()
         await g.recordAttempt(host: "api.supermemory.ai")
-        XCTAssertEqual(await g.outboundNonLoopbackAttempts, 1)
-        XCTAssertFalse(await g.isClean())
+        let n1 = await g.outboundNonLoopbackAttempts
+        XCTAssertEqual(n1, 1)
+        let clean1 = await g.isClean()
+        XCTAssertFalse(clean1)
         await g.endWindow(w1)
 
         let w2 = await g.beginQueryWindow()
-        XCTAssertEqual(await g.outboundNonLoopbackAttempts, 1,
+        let n2 = await g.outboundNonLoopbackAttempts
+        XCTAssertEqual(n2, 1,
                        "beginQueryWindow must not reset session egress count")
-        XCTAssertFalse(await g.isClean())
-        XCTAssertEqual(await PrivacyIndicator.from(g), .egressDetected(count: 1))
+        let clean2 = await g.isClean()
+        XCTAssertFalse(clean2)
+        let indicator = await PrivacyIndicator.from(g)
+        XCTAssertEqual(indicator, .egressDetected(count: 1))
         await g.endWindow(w2)
     }
 }
