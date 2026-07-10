@@ -70,13 +70,15 @@ struct NotchSurfaceView: View {
         .contentShape(Rectangle())
         .gesture(holdToDictate)
         .onTapGesture {
-            // Tapping the listening drop stops + submits; tapping the idle
-            // notch summons.
+            // Click the notch → voice: start on-device dictation (the listening
+            // orb). Click again while listening stops and submits. Hovering the
+            // notch still opens the text field (auto-focused) for typing.
             if dictation.isListening {
                 dictation.stop()
                 if !vm.state.query.isEmpty { Task { await vm.submit() } }
-            } else if phase == .idle {
-                vm.summon()
+            } else {
+                if vm.state.phase == .idle { vm.summon() }
+                dictation.start()
             }
         }
         .background(shortcuts)
@@ -96,7 +98,7 @@ struct NotchSurfaceView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Mnemo")
-        .accessibilityHint("Ask, or hold to dictate")
+        .accessibilityHint("Click or hold to dictate; hover to type")
     }
 
     /// The body is opaque #000 (indistinguishable from the hardware notch). The
