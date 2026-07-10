@@ -177,7 +177,7 @@ final class Dictation: ObservableObject {
 
     // MARK: - Nonisolated helpers (safe from any thread)
 
-    private static func speechAuthorized() async -> Bool {
+    private nonisolated static func speechAuthorized() async -> Bool {
         switch SFSpeechRecognizer.authorizationStatus() {
         case .authorized: return true
         case .notDetermined:
@@ -188,13 +188,13 @@ final class Dictation: ObservableObject {
         }
     }
 
-    private static func localeSupported(_ locale: Locale) async -> Bool {
+    private nonisolated static func localeSupported(_ locale: Locale) async -> Bool {
         let want = locale.identifier(.bcp47)
         return await SpeechTranscriber.supportedLocales.contains { $0.identifier(.bcp47) == want }
     }
 
     /// Installs the on-device model for the locale once (no-op if present).
-    private static func ensureModel(for transcriber: SpeechTranscriber, locale: Locale) async throws {
+    private nonisolated static func ensureModel(for transcriber: SpeechTranscriber, locale: Locale) async throws {
         let want = locale.identifier(.bcp47)
         if await SpeechTranscriber.installedLocales.contains(where: { $0.identifier(.bcp47) == want }) { return }
         if let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
