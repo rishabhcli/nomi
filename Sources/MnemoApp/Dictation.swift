@@ -137,7 +137,9 @@ final class Dictation: ObservableObject {
         // drives the orb.
         nonisolated(unsafe) let cvt = converter
         nonisolated(unsafe) let outFormat = format
-        input.installTap(onBus: 0, bufferSize: 4096, format: tapFormat) { @Sendable [weak self] buffer, _ in
+        // Small tap buffer (~21 ms at 48 kHz) so the amplitude follower updates
+        // ~45×/s, not ~12×/s — finer grain for the render-side smoother to ease.
+        input.installTap(onBus: 0, bufferSize: 1024, format: tapFormat) { @Sendable [weak self] buffer, _ in
             if let out = Self.convert(buffer, using: cvt, to: outFormat) {
                 builder.yield(AnalyzerInput(buffer: out))
             }

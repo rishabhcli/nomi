@@ -349,6 +349,38 @@ final class A87RegressionTests: XCTestCase {
     }
 }
 
+/// M1a: the reducer captures live observability (per-query timing, per-stage
+/// durations, and end-of-query metrics) so the notch can render the trust
+/// footer and the reasoning-trace timeline. Data already flows as QueryEvents;
+/// these assert the reducer lands it in NotchState.
+final class M1aObservabilityReducerTests: XCTestCase {
+    func testReducerStoresQueryMetrics() {
+        var s = NotchState(phase: .answering, query: "q", answer: "Hi.", sources: [])
+        let m = QueryMetrics(firstTokenMs: 120, totalMs: 420, contextTokens: 800,
+                             verificationPassRate: 1.0, egressBlockedCount: 0)
+        s = NotchReducer.apply(.metrics(m), to: s)
+        XCTAssertEqual(s.metrics, m)
+    }
+
+    func testReducerAppendsStageTimingsInOrder() {
+        var s = NotchState(phase: .searching, query: "q", answer: "", sources: [])
+        s = NotchReducer.apply(.stage(name: "retrieve", elapsedMs: 90), to: s)
+        s = NotchReducer.apply(.stage(name: "generate", elapsedMs: 310), to: s)
+        XCTAssertEqual(s.stages, [QueryStage(name: "retrieve", elapsedMs: 90),
+                                  QueryStage(name: "generate", elapsedMs: 310)])
+    }
+
+    func testRoutedClearsStaleObservability() {
+        var s = NotchState(phase: .answering, query: "q", answer: "old", sources: [])
+        s = NotchReducer.apply(.stage(name: "retrieve", elapsedMs: 90), to: s)
+        s = NotchReducer.apply(.metrics(QueryMetrics(totalMs: 400)), to: s)
+        // A fresh query begins — stale timing/metrics must not bleed through.
+        s = NotchReducer.apply(.routed(intent: "lookup", effort: "low"), to: s)
+        XCTAssertEqual(s.stages, [])
+        XCTAssertNil(s.metrics)
+    }
+}
+
 /// A-029 audit: QueryRewriter has no info-level logging surface.
 final class QueryRewriterLoggingAuditTests: XCTestCase {
     func testRewriterFallsBackToOriginalOnGeneratorFailure() async {

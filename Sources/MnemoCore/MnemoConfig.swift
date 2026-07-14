@@ -90,6 +90,13 @@ public struct MnemoConfig: Equatable, Sendable {
     public struct Router: Equatable, Sendable { public var escalationThreshold: Double }
     public struct Media: Equatable, Sendable { public var retryCount: Int }
     public struct Inspector: Equatable, Sendable { public var suppressionTtlDays: Int }
+    /// Local developer observability server. OFF by default, never shipped; binds
+    /// 127.0.0.1 only (the bind host is a constant, never read from config), so
+    /// only the port is configurable. See DevTrace / MnemoDevServer.
+    public struct DevTools: Equatable, Sendable {
+        public var enabled: Bool
+        public var port: Int
+    }
 
     public var engine: Engine
     public var model: Model
@@ -113,6 +120,7 @@ public struct MnemoConfig: Equatable, Sendable {
     public var router: Router
     public var media: Media
     public var inspector: Inspector
+    public var devtools: DevTools
 
     public static func load(from text: String, strict: Bool = true) throws -> MnemoConfig {
         let t = try TOML.parse(text)
@@ -244,7 +252,11 @@ public struct MnemoConfig: Equatable, Sendable {
             context: .init(maxTokens: intOr("context", "max_tokens", 8000)),
             router: .init(escalationThreshold: dblOr("router", "escalation_threshold", 0.6)),
             media: .init(retryCount: intOr("media", "retry_count", 2)),
-            inspector: .init(suppressionTtlDays: intOr("inspector", "suppression_ttl_days", 365))
+            inspector: .init(suppressionTtlDays: intOr("inspector", "suppression_ttl_days", 365)),
+            devtools: .init(
+                enabled: boolOr("devtools", "enabled", false),
+                port: intOr("devtools", "port", 7878)
+            )
         )
     }
 }
@@ -311,6 +323,9 @@ extension MnemoConfig {
         }
         if supervisor.restartBackoffMs < 0 {
             throw ConfigError.invalidValue(field: "supervisor.restart_backoff", reason: "must be >= 0")
+        }
+        if devtools.enabled, !(1...65_535).contains(devtools.port) {
+            throw ConfigError.invalidValue(field: "devtools.port", reason: "must be 1..65535")
         }
     }
 

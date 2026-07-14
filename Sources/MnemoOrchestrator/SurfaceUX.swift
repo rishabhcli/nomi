@@ -159,9 +159,19 @@ public enum SurfaceUX {
         public static let maxVisibleSteps = 12
         public static let collapsedByDefaultOnAnswer = true
 
-        public static func shouldShow(phase: NotchPhase, itemCount: Int, hasAnswer: Bool) -> Bool {
-            itemCount > 0 && phase == .searching && !hasAnswer
+        /// Visible whenever there are steps and a query is active or answered:
+        /// the trace runs live during search, then PERSISTS (collapsed) above the
+        /// streamed answer and terminal states — the progressive live-trace pattern.
+        public static func shouldShow(phase: NotchPhase, itemCount: Int) -> Bool {
+            guard itemCount > 0 else { return false }
+            switch phase {
+            case .searching, .answering, .state: return true
+            case .idle, .input: return false
+            }
         }
+
+        /// Expanded while still working; collapsed once an answer is present.
+        public static func startsExpanded(hasAnswer: Bool) -> Bool { !hasAnswer }
 
         public static func stepOpacity(index: Int, total: Int, reduceMotion: Bool) -> Double {
             guard !reduceMotion else { return 1.0 }

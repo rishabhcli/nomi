@@ -7,6 +7,7 @@ let supervisorSampleConfig = """
 base_url = "http://127.0.0.1:6767"
 byom = "ollama"
 embeddings = "local"
+timeout_ms = 30
 [model]
 runtime_base_url = "http://127.0.0.1:11434"
 synthesis = "gpt-oss:20b"
@@ -39,6 +40,30 @@ actor FakeLauncher: ProcessLauncher {
 }
 struct AlwaysUp: HealthProbe { func isUp(_ url: URL) async -> Bool { true } }
 
+actor DelayedUp: HealthProbe {
+    var failuresRemaining: Int
+    init(failures: Int) { failuresRemaining = failures }
+    func isUp(_ url: URL) async -> Bool {
+        if failuresRemaining > 0 {
+            failuresRemaining -= 1
+            return false
+        }
+        return true
+    }
+}
+
+actor MissingSMFSMountLauncher: ProcessLauncher {
+    func launch(_ p: ManagedProcess) async throws {}
+    func terminate(_ p: ManagedProcess) async {}
+    func boundAddress(_ p: ManagedProcess) async -> String? {
+        switch p {
+        case .ollama: "127.0.0.1:11434"
+        case .engine: "127.0.0.1:6767"
+        case .smfs: nil
+        }
+    }
+}
+
 final class ProcessSupervisorTests: XCTestCase {
     func testStartsInDependencyOrder() async throws {
         let launcher = FakeLauncher()
@@ -68,5 +93,32 @@ final class ProcessSupervisorTests: XCTestCase {
         var text = supervisorSampleConfig + "\n[supervisor]\nrestart_backoff = 500\n"
         let cfg = try MnemoConfig.load(from: text)
         XCTAssertEqual(cfg.supervisor.restartBackoffMs, 500)
+    }
+
+    func testStartupUsesConfiguredTimeoutInsteadOfFiveSecondRace() async throws {
+        let text = supervisorSampleConfig + "\n[health]\nprobe_interval = 1\n"
+        let sup = ProcessSupervisor(
+            config: try MnemoConfig.load(from: text),
+            launcher: FakeLauncher(),
+            probe: DelayedUp(failures: 20)
+        )
+
+        try await sup.startAll()
+    }
+
+    func testHealthyEngineDoesNotMaskMissingSMFSMount() async throws {
+        let text = supervisorSampleConfig + "\n[health]\nprobe_interval = 1\n"
+        let sup = ProcessSupervisor(
+            config: try MnemoConfig.load(from: text),
+            launcher: MissingSMFSMountLauncher(),
+            probe: AlwaysUp()
+        )
+
+        do {
+            try await sup.startAll()
+            XCTFail("startAll must fail when the SMFS mount never becomes live")
+        } catch let error as SupervisorError {
+            XCTAssertEqual(error, .failedToStart(.smfs))
+        }
     }
 }

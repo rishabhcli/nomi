@@ -77,12 +77,27 @@ public enum ScopeClassifier {
         "who are you", "what are you", "what can you do", "help me", "what is this",
     ]
 
+    /// Tokens that, by themselves, form a short conversational utterance. This
+    /// catches natural dictation such as "Hey, what's up? Hey." without treating
+    /// a real question prefixed by "hey" as chit-chat.
+    private static let conversationalTokens: Set<String> = [
+        "hi", "hey", "hello", "yo", "sup", "thanks", "thank", "you", "thx",
+        "ok", "okay", "cool", "nice", "great", "bye", "goodbye", "good",
+        "morning", "night", "there", "whats", "up", "how", "are", "doing",
+        "going", "it", "so", "much", "friend", "mnemo",
+    ]
+
     public static func isCorpusQuestion(_ query: String) -> Bool {
         let q = query.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: " ?!.,"))
         if q.isEmpty { return false }
         if chitChat.contains(q) { return false }
-        // Very short non-question fragments that are pure greetings.
-        if q.split(separator: " ").count <= 2 && chitChat.contains(where: { q.hasPrefix($0) }) { return false }
+        let apostropheFree = q.replacingOccurrences(of: "'", with: "")
+            .replacingOccurrences(of: "’", with: "")
+        let words = apostropheFree.components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+        if words.count <= 8, words.allSatisfy({ conversationalTokens.contains($0) }) {
+            return false
+        }
         return true
     }
 

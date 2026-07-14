@@ -25,6 +25,19 @@ struct FakeGenerator: Generating {
     }
 }
 
+private actor EscalationRecorder {
+    var count = 0
+    func record() { count += 1 }
+}
+
+private struct RecordingEscalator: RouterEscalating {
+    let recorder: EscalationRecorder
+    func classify(_ query: String) async -> Intent {
+        await recorder.record()
+        return .synthesis
+    }
+}
+
 struct FakeDocsStore: DocumentFetching {
     let records: [String: DocumentRecord]
     func document(_ docId: String) async throws -> DocumentRecord? { records[docId] }
@@ -139,6 +152,29 @@ final class QueryServiceTests: XCTestCase {
         XCTAssertEqual(events.last, .done)
     }
 
+    func testChitChatSkipsModelRoutingBeforeAnyAsyncWork() async throws {
+        let escalation = EscalationRecorder()
+        let svc = QueryService(
+            retriever: FakeRetriever(hitsByMode: ["memories": [hit]]),
+            generator: FakeGenerator(tokens: ["GENERATED"]),
+            spans: SpanResolver(docs: FakeDocsStore(records: [:])),
+            defaults: SearchDefaults(searchMode: "memories", rerank: true,
+                                     threshold: 0.35, limit: 12, container: "mnemo"),
+            mountRoot: "",
+            escalator: RecordingEscalator(recorder: escalation))
+
+        var answer = ""
+        for try await event in svc.ask("Hey, what's up? Hey.") {
+            if case let .token(token) = event { answer += token }
+        }
+
+        let escalationCount = await escalation.count
+        XCTAssertEqual(escalationCount, 0,
+                       "obvious chit-chat must never queue behind the local model")
+        XCTAssertFalse(answer.contains("GENERATED"))
+        XCTAssertFalse(answer.isEmpty)
+    }
+
     func testSourceCardsCarryAbsoluteMountPaths() async throws {
         let bare = Retrieved(memory: "alpha", similarity: 0.9,
                              source: .init(docId: "d1", path: "", title: "t"))
@@ -149,6 +185,31 @@ final class QueryServiceTests: XCTestCase {
         var cards: [SourceCard] = []
         for try await e in svc.ask("q") { if case let .sources(c) = e { cards = c } }
         XCTAssertEqual(cards[0].path, "/Users/me/Mnemo/memory/fixture.md")
+    }
+
+    func testExternalVolumeSourcePathIsNotPrefixedBySMFSMount() async throws {
+        let external = Retrieved(
+            memory: "The Orion archive is on the external SSD.",
+            similarity: 0.9,
+            source: .init(
+                docId: "external-1",
+                path: "/Volumes/Extreme SSD/Archives/Orion SSD Archive.pdf",
+                title: "Orion SSD Archive"
+            )
+        )
+        let svc = makeService(
+            hitsByMode: ["memories": [external]],
+            mountRoot: "/Users/me/Mnemo/memory"
+        )
+        var cards: [SourceCard] = []
+        for try await event in svc.ask("find the Orion SSD archive") {
+            if case let .sources(found) = event { cards = found }
+        }
+
+        XCTAssertEqual(
+            cards.first?.path,
+            "/Volumes/Extreme SSD/Archives/Orion SSD Archive.pdf"
+        )
     }
 }
 
@@ -514,5 +575,64 @@ final class QueryDecomposerDocTests: XCTestCase {
     func testDecomposesAndQuestion() {
         let parts = QueryDecomposer.split("what is Bazel and when was it adopted?")
         XCTAssertGreaterThanOrEqual(parts.count, 2)
+    }
+}
+
+/// M1a: every completed query emits end-of-query metrics for the trust footer,
+/// and the egress count is the PER-QUERY delta — a process that has already
+/// blocked calls must still report 0 for a query that egressed nothing.
+final class M1aMetricsEmissionTests: XCTestCase {
+    func testEmitsMetricsWithPerQueryEgressDelta() async throws {
+        let svc = QueryService(
+            retriever: FakeRetriever(hitsByMode: ["memories": [hit]]),
+            generator: FakeGenerator(tokens: ["ok"]),
+            spans: SpanResolver(docs: FakeDocsStore(records: [:])),
+            defaults: SearchDefaults(searchMode: "memories", rerank: true,
+                                     threshold: 0.35, limit: 12, container: "mnemo"),
+            mountRoot: "",
+            egressCounter: { 7 })  // 7 blocked earlier in the process; 0 during this query
+        var events: [QueryEvent] = []
+        for try await e in svc.ask("where do I live?") { events.append(e) }
+        let metrics = events.compactMap { if case let .metrics(m) = $0 { m } else { nil } }
+        XCTAssertEqual(metrics.count, 1, "exactly one .metrics per query")
+        XCTAssertEqual(metrics.first?.egressBlockedCount, 0,
+                       "per-query egress must be the delta, not the cumulative process count")
+        XCTAssertEqual(events.last, .done, ".done remains the terminal event")
+        guard let mIdx = events.firstIndex(where: { if case .metrics = $0 { true } else { false } }),
+              let dIdx = events.firstIndex(of: .done) else {
+            return XCTFail("expected both .metrics and .done")
+        }
+        XCTAssertLessThan(mIdx, dIdx, ".metrics is emitted just before .done")
+    }
+
+    func testEmitsMetricsEvenOnChitChatPath() async throws {
+        let svc = QueryService(
+            retriever: FakeRetriever(hitsByMode: ["memories": [hit]]),
+            generator: FakeGenerator(tokens: ["x"]),
+            spans: SpanResolver(docs: FakeDocsStore(records: [:])),
+            defaults: SearchDefaults(searchMode: "memories", rerank: true,
+                                     threshold: 0.35, limit: 12, container: "mnemo"),
+            mountRoot: "")
+        var sawMetrics = false
+        for try await e in svc.ask("hi") { if case .metrics = e { sawMetrics = true } }
+        XCTAssertTrue(sawMetrics, "even a chit-chat dead-end reports metrics")
+    }
+}
+
+/// M1a: the pipeline emits per-stage timings so the trace can show
+/// "searched · generated · verified" with durations. Order reflects the
+/// pipeline; a service without a verifier emits no verify stage.
+final class M1aStageTimingTests: XCTestCase {
+    func testEmitsRetrieveThenGenerateStages() async throws {
+        let svc = makeService(hitsByMode: ["memories": [hit]], tokens: ["ok"])
+        var stages: [String] = []
+        for try await e in svc.ask("where do I live?") {
+            if case let .stage(name, ms) = e {
+                stages.append(name)
+                XCTAssertGreaterThanOrEqual(ms, 0)
+            }
+        }
+        XCTAssertEqual(stages, ["retrieve", "generate"],
+                       "no verifier configured → retrieve then generate, no verify stage")
     }
 }

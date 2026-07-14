@@ -8,6 +8,7 @@ let package = Package(
         .library(name: "MnemoCore", targets: ["MnemoCore"]),
         .library(name: "MnemoSupervisor", targets: ["MnemoSupervisor"]),
         .library(name: "MnemoOrchestrator", targets: ["MnemoOrchestrator"]),
+        .library(name: "MnemoDevServer", targets: ["MnemoDevServer"]),
         .executable(name: "mnemoctl", targets: ["mnemoctl"]),
         .executable(name: "MnemoApp", targets: ["MnemoApp"]),
     ],
@@ -15,8 +16,10 @@ let package = Package(
         .target(name: "MnemoCore"),
         .target(name: "MnemoSupervisor", dependencies: ["MnemoCore"]),
         .target(name: "MnemoOrchestrator", dependencies: ["MnemoCore"]),
+        .target(name: "MnemoDevServer", dependencies: ["MnemoCore"],
+                resources: [.copy("Resources/dashboard.html")]),
         .executableTarget(name: "mnemoctl", dependencies: ["MnemoSupervisor", "MnemoOrchestrator"]),
-        .executableTarget(name: "MnemoApp", dependencies: ["MnemoOrchestrator", "MnemoSupervisor"],
+        .executableTarget(name: "MnemoApp", dependencies: ["MnemoOrchestrator", "MnemoSupervisor", "MnemoDevServer"],
                           exclude: ["Info.plist"],
                           resources: [.process("VoiceOrb.metal")],
                           // A bare SwiftPM executable has no Info.plist, so TCC
@@ -34,5 +37,6 @@ let package = Package(
         .testTarget(name: "MnemoCoreTests", dependencies: ["MnemoCore"]),
         .testTarget(name: "MnemoSupervisorTests", dependencies: ["MnemoSupervisor"]),
         .testTarget(name: "MnemoOrchestratorTests", dependencies: ["MnemoOrchestrator"]),
+        .testTarget(name: "MnemoDevServerTests", dependencies: ["MnemoDevServer"]),
     ]
 )

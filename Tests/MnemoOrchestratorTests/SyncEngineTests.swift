@@ -16,7 +16,7 @@ final class SelfHealTests: XCTestCase {
             memEntry("m4", docIds: []),                // no sources → orphan
         ]
         let orphans = SelfHeal.orphanedMemoryIds(memories: memories, liveDocIds: ["docA", "docB"])
-        XCTAssertEqual(Set(orphans), ["m2"])
+        XCTAssertEqual(Set(orphans), ["m2", "m4"])
     }
 
     func testAlreadyForgottenAreNotReprocessed() {

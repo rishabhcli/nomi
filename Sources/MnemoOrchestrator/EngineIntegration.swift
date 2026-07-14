@@ -241,24 +241,35 @@ extension EngineClient: ChunkProviding, DocumentSearching, ConversationIngesting
 
     // #2 — upload an arbitrary file through the engine (multipart)
     @discardableResult
-    public func uploadFile(_ fileURL: URL, container: String?) async throws -> String {
+    public func uploadFile(
+        _ fileURL: URL,
+        container: String?,
+        metadata: [String: String] = [:]
+    ) async throws -> String {
         let boundary = "mnemo-\(UUID().uuidString)"
         var r = authorized(baseURL.appending(path: "/v3/documents/file"), method: "POST")
         r.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        var data = Data()
-        func field(_ name: String, _ value: String) {
-            data.append("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(name)\"\r\n\r\n\(value)\r\n".data(using: .utf8)!)
+        var fields: [(String, String)] = []
+        if let container { fields.append(("containerTag", container)) }
+        if !metadata.isEmpty {
+            let encoded = try JSONSerialization.data(withJSONObject: metadata, options: [.sortedKeys])
+            guard let json = String(data: encoded, encoding: .utf8) else {
+                throw CocoaError(.fileWriteInapplicableStringEncoding)
+            }
+            fields.append(("metadata", json))
         }
-        let bytes = try Data(contentsOf: fileURL)
-        data.append("--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"\(fileURL.lastPathComponent)\"\r\nContent-Type: application/octet-stream\r\n\r\n".data(using: .utf8)!)
-        data.append(bytes)
-        data.append("\r\n".data(using: .utf8)!)
-        if let container { field("containerTag", container) }
-        data.append("--\(boundary)--\r\n".data(using: .utf8)!)
-        r.httpBody = data
-        let (respData, resp) = try await session.data(for: r)
+        let body = try MultipartUploadBody.make(
+            fileURL: fileURL,
+            boundary: boundary,
+            fields: fields
+        )
+        defer { try? FileManager.default.removeItem(at: body.url) }
+        r.setValue(String(body.byteCount), forHTTPHeaderField: "Content-Length")
+        let (respData, resp) = try await session.upload(for: r, fromFile: body.url)
         try ok(resp)
         struct Wire: Decodable { let id: String }
         return (try? JSONDecoder().decode(Wire.self, from: respData).id) ?? ""
     }
 }
+
+extension EngineClient: CorpusFileUploading {}

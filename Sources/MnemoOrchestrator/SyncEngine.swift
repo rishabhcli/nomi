@@ -23,11 +23,10 @@ public enum SelfHeal {
     public static func orphanedMemoryIds(memories: [MemoryEntry], liveDocIds: Set<String>) -> [String] {
         memories.compactMap { m in
             guard !m.isForgotten else { return nil }
-            // A-041: exempt source-less syntheses, promoted static facts, and
-            // manual memory adds from orphan GC — they are intentional.
-            if m.documentIds.isEmpty {
-                if m.isStatic || m.parentMemoryId != nil { return nil }
-            }
+            // Static facts and synthesized children can intentionally be
+            // source-less. A dynamic root with no sources has lost all of its
+            // grounding and is eligible for orphan cleanup.
+            if m.documentIds.isEmpty, m.isStatic || m.parentMemoryId != nil { return nil }
             let hasLiveSource = m.documentIds.contains { liveDocIds.contains($0) }
             return hasLiveSource ? nil : m.id
         }

@@ -33,6 +33,12 @@ final class ProductDocTests: XCTestCase {
         XCTAssertEqual(ProductDocContract.inputWidth, 520, accuracy: 0.5)
         XCTAssertEqual(ProductDocContract.bottomRadius, 46, accuracy: 0.5)
         XCTAssertEqual(ProductDocContract.idleRadius, 9, accuracy: 0.5)
+        // Concave shoulders + bottom glass region (UI.md §3).
+        XCTAssertEqual(ProductDocContract.shoulderRadius, 12, accuracy: 0.5)
+        XCTAssertEqual(ProductDocContract.idleShoulder, 5, accuracy: 0.5)
+        XCTAssertEqual(ProductDocContract.glassFraction, 0.36, accuracy: 0.001)
+        // The shoulder must never exceed the bottom radius (stays a subtle flare).
+        XCTAssertLessThan(ProductDocContract.shoulderRadius, ProductDocContract.bottomRadius)
     }
 
     // MARK: - UI.md §12 orb shader

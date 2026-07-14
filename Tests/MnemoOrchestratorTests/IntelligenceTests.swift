@@ -93,6 +93,8 @@ final class ScopeClassifierTests: XCTestCase {
     func testGreetingsAndChitChatAreOutOfScope() {
         XCTAssertFalse(ScopeClassifier.isCorpusQuestion("hi"))
         XCTAssertFalse(ScopeClassifier.isCorpusQuestion("hello there"))
+        XCTAssertFalse(ScopeClassifier.isCorpusQuestion("Hey, what's up? Hey."))
+        XCTAssertFalse(ScopeClassifier.isCorpusQuestion("How are you doing?"))
         XCTAssertFalse(ScopeClassifier.isCorpusQuestion("thanks!"))
         XCTAssertFalse(ScopeClassifier.isCorpusQuestion("who are you?"))
         XCTAssertFalse(ScopeClassifier.isCorpusQuestion("what can you do?"))

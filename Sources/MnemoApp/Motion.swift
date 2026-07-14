@@ -16,14 +16,16 @@ enum Motion {
         reduceMotion ? .easeInOut(duration: 0.20) : base
     }
 
-    /// The signature blur-morph (UI.md §6): outgoing blurs 0→10 and shrinks to
-    /// 0.97; incoming arrives blurred 8→0 from 1.03. Reduce Motion → opacity.
+    /// The signature blur-morph (UI.md §6): incoming content arrives blurred
+    /// 8→0 from scale 1.025, outgoing leaves blurring 0→9 and shrinking to
+    /// 0.975. The blur masks the content pop so swaps read as a soft dissolve
+    /// rather than a hard cut. Reduce Motion → a plain opacity cross-fade.
     static func blurMorph(reduceMotion: Bool) -> AnyTransition {
         guard !reduceMotion else { return .opacity }
         return .asymmetric(
-            insertion: .modifier(active: BlurMorph(blur: 5, scale: 1.012, opacity: 0),
+            insertion: .modifier(active: BlurMorph(blur: 8, scale: 1.025, opacity: 0),
                                  identity: BlurMorph(blur: 0, scale: 1, opacity: 1)),
-            removal: .modifier(active: BlurMorph(blur: 6, scale: 0.988, opacity: 0),
+            removal: .modifier(active: BlurMorph(blur: 9, scale: 0.975, opacity: 0),
                                identity: BlurMorph(blur: 0, scale: 1, opacity: 1)))
     }
 }
@@ -48,20 +50,29 @@ enum Surface {
     static let inputWidth: CGFloat = 520          // hover-open width
     static let readWidth: CGFloat = 520           // answering width
     static let bandHeight: CGFloat = 60           // controls row height inside the tray
-    static let bandFade: CGFloat = 34             // black body → glass tray blend
+    static let bandFade: CGFloat = 34             // empty zone above controls (glass fade rises behind it)
     static let trayHandle: CGFloat = 20           // home-indicator zone below the controls
     /// Full glass tray = blend + controls + handle. The desktop shows through it.
     static var trayHeight: CGFloat { bandFade + bandHeight + trayHandle }
+    /// Liquid Glass rises through the bottom fraction of the surface, melting up
+    /// into the opaque black body (UI.md §3). Floored at `trayHeight` so short
+    /// states still get the full control tray; a third of a tall answer.
+    static let glassFraction: CGFloat = 0.36
     static let answerCap: CGFloat = 400           // answer zone scrolls beyond this
     static let answerFont: CGFloat = 17           // reference: large clean white text
-    static let bottomRadius: CGFloat = 46         // expanded bottom corners (top = 0, square)
+    static let bottomRadius: CGFloat = 46         // expanded bottom corners (convex)
     static let idleRadius: CGFloat = 9            // hardware-like idle rounding
+    // Concave "shoulders": the top corners flare the inset walls out to the
+    // full-bleed top edge — the MacBook-notch silhouette (UI.md §3). The top
+    // edge stays flush; only the walls inset by this radius.
+    static let shoulderRadius: CGFloat = 12       // expanded concave shoulder
+    static let idleShoulder: CGFloat = 5          // subtle shoulder while collapsed
     static let maxBodyHeight: CGFloat = 560       // panel sizing bound
     // The listening "drop": a narrow pendant that grows straight DOWN from the
     // notch (never widening it), rounded into a semicircle bottom, orb inside.
     static let dropWidth: CGFloat = 176
     static let dropBody: CGFloat = 188            // body length below the notch
-    static let orbDiameter: CGFloat = 120
+    static let orbDiameter: CGFloat = 132         // listening-orb sphere diameter
     // Home-indicator pill at the tray bottom (reference detail).
     static let homeIndicatorW: CGFloat = 40
     static let homeIndicatorH: CGFloat = 5

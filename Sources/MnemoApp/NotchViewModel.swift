@@ -30,6 +30,8 @@ final class NotchViewModel: ObservableObject {
     private var history = QueryHistory(cap: 50)
     private var lastQuery = ""
     private var tone: ResponseTone
+    private var activeQueryTask: Task<Void, Never>?
+    private var queryGeneration = 0
 
     /// True while a query is streaming. Used to lock out re-summon and
     /// mouse-leave dismissal so a hover-out/in during an in-flight answer can't
@@ -69,16 +71,48 @@ final class NotchViewModel: ObservableObject {
             }
         }
     }
-    func dismiss() { state.phase = .idle }
+    func dismiss() {
+        invalidateActiveQuery()
+        state.phase = .idle
+    }
 
     /// /clear or Cmd+K — fresh conversation, history preserved for recall.
     func newConversation() {
+        invalidateActiveQuery()
         state = NotchState(phase: .input, query: "", answer: "", sources: [])
     }
 
     // MARK: - Submit / commands
 
-    func submit() async {
+    /// Own the submission task so dismiss and the visible cancel control can
+    /// stop real work instead of merely hiding the spinner.
+    func beginSubmit() {
+        guard activeQueryTask == nil else { return }
+        queryGeneration &+= 1
+        let generation = queryGeneration
+        activeQueryTask = Task { [weak self] in
+            guard let self else { return }
+            await self.submit(generation: generation)
+            if self.queryGeneration == generation {
+                self.activeQueryTask = nil
+            }
+        }
+    }
+
+    func cancelQuery() {
+        guard activeQueryTask != nil || isQuerying else { return }
+        invalidateActiveQuery()
+        state = NotchInteraction.cancelledState(state)
+        refreshPrivacy()
+    }
+
+    private func invalidateActiveQuery() {
+        queryGeneration &+= 1
+        activeQueryTask?.cancel()
+        activeQueryTask = nil
+    }
+
+    private func submit(generation: Int) async {
         let raw = state.query
         guard !raw.trimmingCharacters(in: .whitespaces).isEmpty else { return }
         // A query is already in flight — drop repeat submits so a second message
@@ -86,19 +120,19 @@ final class NotchViewModel: ObservableObject {
         // its working/searching state until the answer arrives).
         guard state.phase != .searching else { return }
         switch CommandParser.parse(raw) {
-        case .command(let command): await handle(command)
+        case .command(let command): await handle(command, generation: generation)
         case .query(let q):
             // Metacognition (beats-Siri #8): "how sure are you?" is answered
             // honestly from the measured grounding of the last answer.
             if ConfidenceReport.isMetaQuestion(q), !state.answer.isEmpty {
                 showInfo(ConfidenceReport.report(state.overallConfidence, sourceCount: state.sources.count))
             } else {
-                await runQuery(q)
+                await runQuery(q, generation: generation)
             }
         }
     }
 
-    private func handle(_ command: Command) async {
+    private func handle(_ command: Command, generation: Int) async {
         switch command {
         case .help:
             showInfo(CommandParser.helpText)
@@ -122,7 +156,7 @@ final class NotchViewModel: ObservableObject {
                 showInfo("Unknown tone “\(raw)”. Try: brief, balanced, or detailed.")
             }
         case .more:
-            await goDeeper()
+            await goDeeper(generation: generation)
         case .why:
             // Provenance chain (beats-Siri #7): claim → source for the last answer.
             if state.answer.isEmpty {
@@ -143,11 +177,11 @@ final class NotchViewModel: ObservableObject {
     }
 
     /// Go deeper (#9): re-ask the last question at a more thorough tone.
-    func goDeeper() async {
+    func goDeeper(generation: Int? = nil) async {
         guard !lastQuery.isEmpty else { showInfo("Ask something first, then /more digs deeper."); return }
         let previousTone = tone
         tone = .detailed
-        await runQuery(lastQuery)
+        await runQuery(lastQuery, generation: generation)
         tone = previousTone
     }
 
@@ -160,7 +194,8 @@ final class NotchViewModel: ObservableObject {
         NSPasteboard.general.setString(md, forType: .string)
     }
 
-    private func runQuery(_ q: String) async {
+    private func runQuery(_ q: String, generation: Int? = nil) async {
+        guard generation.map({ $0 == queryGeneration }) ?? true else { return }
         rememberHistory(q)
         lastQuery = q
         state.query = q
@@ -179,14 +214,19 @@ final class NotchViewModel: ObservableObject {
 
         do {
             for try await event in makeService(activeContainer, tone).ask(q) {
+                try Task.checkCancellation()
+                guard generation.map({ $0 == queryGeneration }) ?? true else { return }
                 state = NotchReducer.apply(event, to: state)
             }
+        } catch is CancellationError {
+            return
         } catch {
+            guard generation.map({ $0 == queryGeneration }) ?? true else { return }
             state.phase = .state
             state.terminal = .engineUnreachable
             state.status = ""
         }
-        refreshPrivacy()
+        if generation.map({ $0 == queryGeneration }) ?? true { refreshPrivacy() }
     }
 
     /// Recovery-button actions actually do something (not no-ops).

@@ -11,7 +11,8 @@ public enum Coverage {
     /// Renderable events when coverage is empty and there are no nearby matches
     /// to suggest — a defined "nothing matched" outcome, never a blank screen (M12).
     public static func emptyEvidenceEvents() -> [QueryEvent] {
-        [.state(.empty(nearest: [])),
+        [.token("I don't have anything in your files about that."),
+         .state(.empty(nearest: [])),
          .reasoning(["Nothing in your corpus matched this query"])]
     }
 

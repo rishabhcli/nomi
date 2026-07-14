@@ -29,6 +29,36 @@ public struct MicEnvelope {
     }
 }
 
+/// Render-side smoother that turns the coarse mic envelope (updated only
+/// ~12–45×/s by the audio tap) into a fluid, display-rate signal for the orb
+/// (UI.md §12.2). Unlike `MicEnvelope.follow` — whose per-step rate silently
+/// depends on the audio buffer size — this eases with an exponential coefficient
+/// derived from the real frame `dt`, so the smoothing is **frame-rate
+/// independent**: nothing staircases at the buffer rate. Fast attack, slow
+/// release, and — being a one-pole — it can never overshoot.
+public struct AmplitudeSmoother {
+    public var current: Double
+    let attack: Double   // seconds — time constant while rising
+    let release: Double  // seconds — time constant while falling
+
+    public init(current: Double = 0, attack: Double = 0.06, release: Double = 0.18) {
+        self.current = current
+        self.attack = attack
+        self.release = release
+    }
+
+    /// Ease toward `target` over the elapsed `dt` seconds. `k = 1 - e^(-dt/τ)`
+    /// is exact for exponential decay, so splitting a step into N sub-steps
+    /// yields the same result (the property `testFrameRateIndependence` pins).
+    public mutating func advance(toward target: Double, dt: Double) -> Double {
+        guard dt > 0 else { return current }
+        let tau = target >= current ? attack : release
+        let k = tau > 0 ? 1 - exp(-dt / tau) : 1
+        current += (target - current) * k
+        return current
+    }
+}
+
 /// Per-frame shader uniforms derived from the smoothed amplitude (UI.md §12.4).
 /// The only thing that changes per frame; everything else is on the GPU.
 public struct OrbUniforms: Equatable, Sendable {

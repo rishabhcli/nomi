@@ -134,10 +134,20 @@ final class SurfaceDictationDiscoverabilityTests: XCTestCase {
 // MARK: - E-0008 Reasoning trace legibility
 
 final class SurfaceReasoningTraceTests: XCTestCase {
-    func testE0008_showsOnlyWhileSearching() {
-        XCTAssertTrue(SurfaceUX.ReasoningTrace.shouldShow(phase: .searching, itemCount: 2, hasAnswer: false))
-        XCTAssertFalse(SurfaceUX.ReasoningTrace.shouldShow(phase: .answering, itemCount: 2, hasAnswer: true))
-        XCTAssertFalse(SurfaceUX.ReasoningTrace.shouldShow(phase: .searching, itemCount: 0, hasAnswer: false))
+    func testE0008_persistsFromSearchThroughAnswer() {
+        // Live during search, and PERSISTS over the streamed answer + terminals
+        // (progressive live-trace). Hidden only when idle/input or with no steps.
+        XCTAssertTrue(SurfaceUX.ReasoningTrace.shouldShow(phase: .searching, itemCount: 2))
+        XCTAssertTrue(SurfaceUX.ReasoningTrace.shouldShow(phase: .answering, itemCount: 2))
+        XCTAssertTrue(SurfaceUX.ReasoningTrace.shouldShow(phase: .state, itemCount: 2))
+        XCTAssertFalse(SurfaceUX.ReasoningTrace.shouldShow(phase: .answering, itemCount: 0))
+        XCTAssertFalse(SurfaceUX.ReasoningTrace.shouldShow(phase: .idle, itemCount: 2))
+        XCTAssertFalse(SurfaceUX.ReasoningTrace.shouldShow(phase: .input, itemCount: 2))
+    }
+
+    func testE0008_startsExpandedWhileWorkingCollapsedOnceAnswered() {
+        XCTAssertTrue(SurfaceUX.ReasoningTrace.startsExpanded(hasAnswer: false))
+        XCTAssertFalse(SurfaceUX.ReasoningTrace.startsExpanded(hasAnswer: true))
     }
 
     func testE0008_stepOpacityIncreasesWithIndex() {

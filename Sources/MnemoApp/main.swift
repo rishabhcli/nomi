@@ -46,8 +46,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let config: MnemoConfig
     var controller: NotchController!
     var hover: HoverDetector!
-    var hotkeyMonitor: Any?
+    var hotkey: GlobalHotKey?
     var debugHooks: DebugHooks?
+    var devTools: DevTools?
 
     init(config: MnemoConfig) { self.config = config }
 
@@ -91,18 +92,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        // Global hotkey (cmd+shift+space) — keyboard-only summon/dismiss.
-        hotkeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] e in
-            if e.modifierFlags.intersection([.command, .shift]) == [.command, .shift],
-               e.charactersIgnoringModifiers == " " {
-                Task { @MainActor in
-                    guard let self, let c = self.controller else { return }
-                    c.vm.state.phase == .idle ? c.summon() : c.dismiss()
-                }
+        // Registered global hotkey — reliable for an accessory app and sourced
+        // from mnemo.toml rather than hardcoded event matching.
+        if let chord = HotkeyChord.parse(config.ui.summonHotkey) {
+            hotkey = GlobalHotKey(chord: chord) { [weak self] in
+                guard let self, let c = self.controller else { return }
+                c.vm.state.phase == .idle ? c.summon() : c.dismiss()
             }
         }
 
         debugHooks = DebugHooks.install(controller: controller)
+        devTools = DevTools.startIfEnabled(config: config, controller: controller)
     }
 
     @objc func dismissNotch() {

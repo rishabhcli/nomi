@@ -24,7 +24,7 @@ public enum SLAGate {
         Result(metric: "sources_render_ms", observedMs: observedMs, limitMs: config.sla.sourcesRenderMs)
     }
 
-    /// P95 over samples — fails closed when any sample exceeds 2× SLA (regression guard).
+    /// P95 over samples — the hard regression guard trips at 2x the normal SLA.
     public static func p95(_ samplesMs: [Int]) -> Int {
         guard !samplesMs.isEmpty else { return 0 }
         let sorted = samplesMs.sorted()
@@ -33,6 +33,7 @@ public enum SLAGate {
     }
 
     public static func regressionFailed(samplesMs: [Int], limitMs: Int) -> Bool {
-        p95(samplesMs) > limitMs
+        guard limitMs > 0 else { return true }
+        return p95(samplesMs) >= limitMs * 2
     }
 }

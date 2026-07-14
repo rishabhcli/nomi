@@ -33,7 +33,8 @@ public enum AnswerShape: Equatable, Sendable {
         if has(["compare", "comparison", " vs ", " versus ", "differ", "difference between", "contrast"]) {
             return .comparison
         }
-        if has(["timeline", "chronolog", "history of", "trace ", "evolve", "evolved", "over time", "sequence of"]) {
+        if has(["timeline", "chronolog", "history of", "trace ", "evolve", "evolved", "over time", "sequence of"])
+            || (intent != .lookup && has(["when did", "when was"])) {
             return .timeline
         }
         if has(["list ", "what are ", "which ", "steps", "ways to", "options", "blockers"]) {

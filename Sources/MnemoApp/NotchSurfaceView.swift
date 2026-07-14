@@ -22,6 +22,10 @@ struct NotchSurfaceView: View {
     @State private var answerHeight: CGFloat = 0   // measured once per content change
     @State private var heldDictation = false       // push-to-talk started by a hold (vs a tap)
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorSchemeContrast) private var contrast
+    @Namespace private var glassNS
+    /// System "Increase Contrast" — strengthens tints, text, and the edge.
+    private var highContrast: Bool { contrast == .increased }
 
     private var phase: NotchPhase { vm.state.phase }
     private var listening: Bool { dictation.isListening }
@@ -48,56 +52,49 @@ struct NotchSurfaceView: View {
 
     private var surface: some View {
         let geo = geometry
-        return ZStack(alignment: .top) {
-            base(geo)
-            content
-                .padding(.top, notchSize.height)                 // clears the hardware notch
-                .padding(.bottom, showsTray ? Surface.trayHeight : 0)
-            if showsTray {
-                InputTray(vm: vm, dictation: dictation, focused: $focused,
-                          searching: phase == .searching, reduceMotion: reduceMotion,
-                          showHandle: showsHandle)
-                    .frame(height: Surface.trayHeight)
-                    .frame(maxHeight: .infinity, alignment: .bottom)
-                    .transition(.opacity)
+        // One GlassEffectContainer groups every glass element (the bottom
+        // material + the terminal-recovery buttons) so glass never samples glass
+        // (UI.md §1.2, fidelity F5).
+        return GlassEffectContainer {
+            ZStack(alignment: .top) {
+                material(geo)
+                content
+                    .padding(.top, notchSize.height)                 // clears the hardware notch
+                    .padding(.bottom, showsTray ? Surface.trayHeight : 0)
+                if showsTray {
+                    InputTray(vm: vm, dictation: dictation, focused: $focused,
+                              searching: phase == .searching, reduceMotion: reduceMotion,
+                              showHandle: showsHandle)
+                        .frame(height: Surface.trayHeight)
+                        .frame(maxHeight: .infinity, alignment: .bottom)
+                        .transition(.opacity)
+                }
+                voiceGestureTarget(surfaceWidth: geo.width)
             }
         }
         .frame(width: geo.width, height: geo.height, alignment: .top)
-        .clipShape(NotchShape(bottomCornerRadius: geo.radius))
+        .clipShape(NotchShape(topCornerRadius: geo.shoulder, bottomCornerRadius: geo.radius))
+        // A hairline edge separates the black slab from a dark desktop without
+        // breaking the seamless top: the stroke is clear at the very top (where
+        // the surface continues the bezel) and strongest down the sides/bottom.
+        .overlay {
+            if phase != .idle {
+                NotchShape(topCornerRadius: geo.shoulder, bottomCornerRadius: geo.radius)
+                    .stroke(
+                        LinearGradient(
+                            colors: [.white.opacity(0),
+                                     .white.opacity(highContrast
+                                         ? SurfaceUX.IncreaseContrast.borderStrokeOpacity : 0.08)],
+                            startPoint: .top, endPoint: .bottom),
+                        lineWidth: 0.75)
+            }
+        }
         .shadow(color: .black.opacity(phase == .idle ? 0 : Surface.shadowOpacity),
                 radius: Surface.shadowRadius, y: Surface.shadowY)
         .overlay(alignment: .bottomLeading) { privacyDot }
         .animation(Motion.adaptive(spring, reduceMotion: reduceMotion), value: geo)
-        .contentShape(Rectangle())
-        // Click the notch → voice: toggle on-device dictation (the listening
-        // orb). Click again while listening stops and submits. A press-hold is
-        // push-to-talk. Tap and long-press coexist cleanly here — unlike the old
-        // sequenced LongPress→Drag gesture, which swallowed the tap so a click
-        // did nothing. Hover still opens the auto-focused text field for typing.
-        .onTapGesture {
-            if dictation.isListening {
-                dictation.stop()
-                if !vm.state.query.isEmpty { Task { await vm.submit() } }
-            } else {
-                if vm.state.phase == .idle { vm.summon() }
-                dictation.start()
-            }
-        }
-        .onLongPressGesture(minimumDuration: 0.35, maximumDistance: 50) {
-            guard !dictation.isListening else { return }
-            if vm.state.phase == .idle { vm.summon() }
-            dictation.start()
-            heldDictation = true
-        } onPressingChanged: { pressing in
-            guard !pressing else { return }
-            // Release ends push-to-talk — but only if a hold started it, so a
-            // quick tap's toggle isn't immediately cancelled by the release.
-            if heldDictation, dictation.isListening {
-                dictation.stop()
-                if !vm.state.query.isEmpty { Task { await vm.submit() } }
-            }
-            heldDictation = false
-        }
+        // Voice gestures are attached only to the collar overlay above. The
+        // input, answer, source, and recovery regions remain normal controls.
         .background(shortcuts)
         .onExitCommand { NSApp.sendAction(#selector(AppDelegate.dismissNotch), to: nil, from: nil) }
         .onChange(of: phase) { _, p in if p == .input || p == .answering { focused = true } }
@@ -115,18 +112,78 @@ struct NotchSurfaceView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Mnemo")
-        .accessibilityHint("Click or hold to dictate; hover to type")
+        .accessibilityHint("Click or hold the notch to dictate; hover to type")
     }
 
-    /// The body is opaque #000 (indistinguishable from the hardware notch). The
-    /// tray region is left CLEAR so the tray's Liquid Glass samples the desktop
-    /// — that is what makes the bottom translucent like the reference. Idle and
-    /// the listening drop are fully black.
-    @ViewBuilder private func base(_ geo: SurfaceGeometry) -> some View {
+    /// Stable, notch-sized hit target. Keeping these gestures off the outer
+    /// surface prevents ordinary interaction with the expanded UI from
+    /// unexpectedly opening the microphone.
+    private func voiceGestureTarget(surfaceWidth: CGFloat) -> some View {
+        let target = NotchInteraction.voiceTargetRect(
+            surfaceWidth: surfaceWidth,
+            notchSize: notchSize
+        )
+        return Color.clear
+            .frame(width: target.width, height: target.height)
+            .contentShape(Rectangle())
+            .accessibilityLabel("Dictate")
+            // Click the notch -> voice: toggle on-device dictation. Click again
+            // while listening stops and submits; press-hold is push-to-talk.
+        .onTapGesture {
+            if dictation.isListening {
+                dictation.stop()
+                if !vm.state.query.isEmpty { vm.beginSubmit() }
+            } else {
+                if vm.state.phase == .idle { vm.summon() }
+                dictation.start()
+            }
+        }
+        .onLongPressGesture(minimumDuration: 0.35, maximumDistance: 50) {
+            guard !dictation.isListening else { return }
+            if vm.state.phase == .idle { vm.summon() }
+            dictation.start()
+            heldDictation = true
+        } onPressingChanged: { pressing in
+            guard !pressing else { return }
+            // Release ends push-to-talk — but only if a hold started it, so a
+            // quick tap's toggle isn't immediately cancelled by the release.
+            if heldDictation, dictation.isListening {
+                dictation.stop()
+                if !vm.state.query.isEmpty { vm.beginSubmit() }
+            }
+            heldDictation = false
+        }
+    }
+
+    /// The surface material (UI.md §3). Idle and the listening drop are solid
+    /// opaque black (indistinguishable from the hardware notch). In the expanded
+    /// states, Liquid Glass fills the bottom ~third and the opaque-black body
+    /// fades out across it — one seamless melt from pure black at the top to
+    /// translucent glass at the bottom (the desktop shows through). The glass is
+    /// drawn BEHIND the body so it samples the desktop, not the black; the
+    /// body's downward fade is what reveals it.
+    @ViewBuilder private func material(_ geo: SurfaceGeometry) -> some View {
         if showsTray {
-            VStack(spacing: 0) {
+            let glassRegion = max(Surface.trayHeight, geo.height * Surface.glassFraction)
+            let fadeStart = max(0, 1 - glassRegion / max(geo.height, 1))
+            ZStack(alignment: .top) {
+                Rectangle().fill(.clear)
+                    .glassEffect(
+                        .regular.tint(.black.opacity(
+                            SurfaceUX.GlassHierarchy.trayTint(highContrast: highContrast))),
+                        in: Rectangle())
+                    .glassEffectID("surface", in: glassNS)
+                    .frame(height: glassRegion)
+                    .frame(maxHeight: .infinity, alignment: .bottom)
                 Rectangle().fill(.black)
-                Color.clear.frame(height: Surface.trayHeight)
+                    .mask(
+                        LinearGradient(
+                            stops: [
+                                .init(color: .white, location: 0),
+                                .init(color: .white, location: fadeStart),
+                                .init(color: .white.opacity(0), location: 1),
+                            ],
+                            startPoint: .top, endPoint: .bottom))
             }
         } else {
             Rectangle().fill(.black)
@@ -163,7 +220,7 @@ struct NotchSurfaceView: View {
                 .padding(.horizontal, 22)
             Text("Searching your memory…")
                 .font(.system(size: 11))
-                .foregroundStyle(.white.opacity(0.5))
+                .foregroundStyle(.white.opacity(highContrast ? 0.95 : 0.72))
         }
         .frame(maxWidth: .infinity, alignment: .center)
         .padding(.top, 6)
@@ -194,7 +251,7 @@ struct NotchSurfaceView: View {
 
     private var shortcuts: some View {
         ZStack {
-            Button("") { Task { await vm.submit() } }
+            Button("") { vm.beginSubmit() }
                 .keyboardShortcut(.return, modifiers: .command).hidden()
             Button("") { vm.newConversation() }
                 .keyboardShortcut("k", modifiers: .command).hidden()
@@ -211,15 +268,19 @@ struct SurfaceGeometry: Equatable {
     let width: CGFloat
     let height: CGFloat
     let radius: CGFloat
+    /// Concave top-corner (shoulder) radius; rides the same spring as `radius`.
+    let shoulder: CGFloat
 
     init(phase: NotchPhase, listening: Bool, notch: CGSize, answerHeight: CGFloat) {
         let notchH = max(notch.height, 24)
         if listening {
             // The drop: notch-width (never wider), grows down, semicircle bottom.
+            // The semicircle leaves no room for a shoulder (geometry clamps it).
             let w = max(notch.width, Surface.dropWidth)
             width = w
             height = notchH + Surface.dropBody
             radius = w / 2
+            shoulder = Surface.idleShoulder
             return
         }
         switch phase {
@@ -227,15 +288,18 @@ struct SurfaceGeometry: Equatable {
             width = notch.width
             height = notchH
             radius = Surface.idleRadius
+            shoulder = Surface.idleShoulder
         case .input, .searching:
             width = Surface.inputWidth
             height = notchH + Surface.trayHeight
             radius = Surface.bottomRadius
+            shoulder = Surface.shoulderRadius
         case .answering, .state:
             width = Surface.readWidth
             let zone = min(max(answerHeight, 48), Surface.answerCap)
             height = notchH + zone + 12 + Surface.trayHeight
             radius = Surface.bottomRadius
+            shoulder = Surface.shoulderRadius
         }
     }
 }

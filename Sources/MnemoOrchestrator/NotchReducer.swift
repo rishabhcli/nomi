@@ -31,6 +31,8 @@ public struct NotchState: Equatable, Sendable {
     public var entities: [String]              // salient entities to explore (intelligence #8)
     public var reasoning: [String]             // visible reasoning steps (beats-Siri #1)
     public var feedback: Bool? = nil           // thumbs up/down on the current answer
+    public var stages: [QueryStage] = []       // completed pipeline stages + timings (M1 observability)
+    public var metrics: QueryMetrics? = nil    // end-of-query metrics for the trust footer (M1 observability)
     public init(phase: NotchPhase, query: String, answer: String, sources: [SourceCard],
                 terminal: TerminalState? = nil, unsupportedSentences: Set<Int> = [],
                 status: String = "", transcript: [Turn] = [],
@@ -136,10 +138,16 @@ public enum NotchReducer {
             s.entities = []
             s.reasoning = []
             s.feedback = nil
+            s.stages = []           // stale timings must not bleed into a new query
+            s.metrics = nil
         case .related(let docs):
             s.related = docs
         case .reasoning(let steps):
             s.reasoning = steps
+        case .stage(let name, let elapsedMs):
+            s.stages.append(QueryStage(name: name, elapsedMs: elapsedMs))
+        case .metrics(let m):
+            s.metrics = m
         case .entities(let ents):
             s.entities = ents
         case .retrying(let reason):

@@ -106,4 +106,21 @@ final class KeywordBackstopTests: XCTestCase {
                                         wantDigits: false, maxMatches: 2)
         XCTAssertTrue(hits.contains { $0.memory.contains("Pruned on") })
     }
+
+    func testFindsNestedBinaryByExactFilename() throws {
+        let nested = dir.appending(path: "Archives/Contracts")
+        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+        let file = nested.appending(path: "Orion SSD Archive.pdf")
+        try Data([0x25, 0x50, 0x44, 0x46]).write(to: file)
+
+        let hits = KeywordBackstop.best(
+            terms: ["orion", "ssd", "archive"],
+            root: dir.path,
+            wantDigits: false,
+            maxMatches: 3
+        )
+
+        XCTAssertEqual(hits.first?.source.path, file.resolvingSymlinksInPath().path)
+        XCTAssertTrue(hits.first?.memory.contains("Orion SSD Archive.pdf") == true)
+    }
 }

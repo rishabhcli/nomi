@@ -28,6 +28,9 @@ public enum ProductDocContract {
     public static let inputWidth: CGFloat = 520
     public static let bottomRadius: CGFloat = 46
     public static let idleRadius: CGFloat = 9
+    public static let shoulderRadius: CGFloat = 12   // expanded concave shoulder
+    public static let idleShoulder: CGFloat = 5      // collapsed concave shoulder
+    public static let glassFraction: CGFloat = 0.36  // bottom Liquid Glass region
     public static let orbMaxFill: Double = 0.80
     public static let orbIdleFlow: Double = 0.06
 

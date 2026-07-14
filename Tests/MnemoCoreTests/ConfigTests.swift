@@ -53,4 +53,20 @@ final class ConfigTests: XCTestCase {
         let text = Self.sample + "\n[bench]\nsample_size = 0\n"
         XCTAssertThrowsError(try MnemoConfig.load(from: text).validateInvariant())
     }
+
+    func testParsesConfiguredGlobalHotkeyChord() throws {
+        let chord = try XCTUnwrap(HotkeyChord.parse("cmd+shift+space"))
+        XCTAssertEqual(chord.key, "space")
+        XCTAssertEqual(chord.modifiers, [.command, .shift])
+
+        let alternate = try XCTUnwrap(HotkeyChord.parse("control+option+k"))
+        XCTAssertEqual(alternate.key, "k")
+        XCTAssertEqual(alternate.modifiers, [.control, .option])
+    }
+
+    func testRejectsMalformedGlobalHotkeyChord() {
+        XCTAssertNil(HotkeyChord.parse("cmd+shift"))
+        XCTAssertNil(HotkeyChord.parse("cmd+wat+space"))
+        XCTAssertNil(HotkeyChord.parse("cmd+k+space"))
+    }
 }

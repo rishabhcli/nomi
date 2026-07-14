@@ -126,26 +126,34 @@ public enum KeywordBackstop {
     /// guess the single "answer paragraph" by keyword density.
     static func best(terms: [String], root: String, wantDigits: Bool, maxMatches: Int) -> [Retrieved] {
         let fm = FileManager.default
-        guard !terms.isEmpty, let names = try? fm.contentsOfDirectory(atPath: root) else { return [] }
+        guard !terms.isEmpty else { return [] }
         let stems = Array(Set(terms.map(stem)))
         let textExts: Set<String> = ["md", "txt", "csv", "json", "toml", "yaml", "yml", "rtf", "html"]
 
-        var files: [(name: String, content: String, lower: String)] = []
-        for name in names.sorted() {
-            let ext = (name as NSString).pathExtension.lowercased()
-            guard textExts.contains(ext), !name.hasSuffix(".smfs-error.txt") else { continue }
-            let path = root + "/" + name
-            guard let attrs = try? fm.attributesOfItem(atPath: path),
-                  (attrs[.size] as? Int ?? 0) < 2_000_000,
-                  let content = try? String(contentsOfFile: path, encoding: .utf8) else { continue }
-            files.append((name, content, content.lowercased()))
+        var files: [(name: String, path: String, content: String, lower: String)] = []
+        for url in recursiveFiles(root: root) {
+            let name = relativePath(url.path, root: root)
+            guard !name.hasSuffix(".smfs-error.txt") else { continue }
+            let nameLower = name.lowercased()
+            let nameMatches = stems.contains { nameLower.contains($0) }
+            let ext = url.pathExtension.lowercased()
+            let attrs = try? fm.attributesOfItem(atPath: url.path)
+            let isSmall = (attrs?[.size] as? Int ?? Int.max) < 2_000_000
+            let content = textExts.contains(ext) && isSmall
+                ? ((try? String(contentsOf: url, encoding: .utf8)) ?? "")
+                : ""
+            guard nameMatches || stems.contains(where: { content.lowercased().contains($0) }) else {
+                continue
+            }
+            files.append((name, url.path, content, content.lowercased()))
         }
 
         // Rarity: a stem found in few files is a strong signal ("prune"),
         // one found everywhere is weak ("resume" across job notes).
         var docFreq: [String: Int] = [:]
-        for (_, _, lower) in files {
-            for s in stems where lower.contains(s) { docFreq[s, default: 0] += 1 }
+        for file in files {
+            let searchable = file.lower + "\n" + file.name.lowercased()
+            for s in stems where searchable.contains(s) { docFreq[s, default: 0] += 1 }
         }
         func weight(_ s: String) -> Double {
             let df = docFreq[s] ?? 0
@@ -159,13 +167,20 @@ public enum KeywordBackstop {
         struct Line { let score: Double; let text: String; let file: Int }
         var lines: [Line] = []
         for (i, file) in files.enumerated() {
-            guard stems.contains(where: { file.lower.contains($0) }) else { continue }
             // The filename itself matching several stems means the question is
             // *about this document* — its leading lines are the answer even
             // when they don't repeat the query's words (tables, lists).
             let nameLower = file.name.lowercased()
             let titleMatches = stems.filter { nameLower.contains($0) }.count
-            if titleMatches >= 2 {
+            let contentMatches = stems.contains { file.lower.contains($0) }
+            guard contentMatches || titleMatches > 0 else { continue }
+            if file.content.isEmpty, titleMatches > 0 {
+                lines.append(Line(
+                    score: 5.0 + Double(titleMatches),
+                    text: "File: \((file.name as NSString).lastPathComponent)\nLocation: \(file.path)",
+                    file: i
+                ))
+            } else if titleMatches >= 2 {
                 var kept = 0
                 for rawLine in file.content.components(separatedBy: "\n") {
                     let line = rawLine.trimmingCharacters(in: .whitespaces)
@@ -220,9 +235,37 @@ public enum KeywordBackstop {
             let name = files[idx].name
             return Retrieved(
                 memory: byFile[idx]!.joined(separator: "\n"), similarity: 0.55,
-                source: SourceLocator(docId: "", path: "/" + name,
-                                      title: (name as NSString).deletingPathExtension))
+                source: SourceLocator(
+                    docId: "",
+                    path: files[idx].path,
+                    title: ((name as NSString).lastPathComponent as NSString).deletingPathExtension
+                ))
         }
+    }
+
+    private static func recursiveFiles(root: String) -> [URL] {
+        let rootURL = URL(fileURLWithPath: root, isDirectory: true)
+        let keys: [URLResourceKey] = [.isRegularFileKey, .isSymbolicLinkKey]
+        guard let enumerator = FileManager.default.enumerator(
+            at: rootURL,
+            includingPropertiesForKeys: keys,
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else { return [] }
+        var urls: [URL] = []
+        while let url = enumerator.nextObject() as? URL {
+            guard let values = try? url.resourceValues(forKeys: Set(keys)),
+                  values.isRegularFile == true,
+                  values.isSymbolicLink != true
+            else { continue }
+            urls.append(url)
+        }
+        return urls.sorted { $0.path < $1.path }
+    }
+
+    private static func relativePath(_ path: String, root: String) -> String {
+        let prefix = root.hasSuffix("/") ? root : root + "/"
+        guard path.hasPrefix(prefix) else { return (path as NSString).lastPathComponent }
+        return String(path.dropFirst(prefix.count))
     }
 
     /// The full rescue: find salient-but-uncovered terms, grep the mount for
@@ -240,8 +283,9 @@ public enum KeywordBackstop {
         // that document — always pull its actual lines (memories are distilled
         // summaries and often drop the concrete values being asked for).
         let stems = terms.map(stem)
-        let titleMatch = ((try? FileManager.default.contentsOfDirectory(atPath: mountRoot)) ?? [])
-            .contains { name in stems.filter { name.lowercased().contains($0) }.count >= 2 }
+        let titleMatch = recursiveFiles(root: mountRoot).contains { url in
+            stems.filter { url.lastPathComponent.lowercased().contains($0) }.count >= 2
+        }
         guard !missing.isEmpty || numeric || titleMatch else { return (evidence, nil) }
 
         let searchTerms = (numeric || titleMatch) ? terms : missing

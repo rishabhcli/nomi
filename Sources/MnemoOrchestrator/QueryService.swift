@@ -73,6 +73,8 @@ public enum QueryEvent: Equatable, Sendable {
     case entities([String])     // salient entities to explore (intelligence #8)
     case related([SourceCard])  // see-also documents beyond the cited ones (#8)
     case reasoning([String])    // visible reasoning steps (beats-Siri #1)
+    case stage(name: String, elapsedMs: Int)  // a completed pipeline stage + its duration (M1 observability)
+    case metrics(QueryMetrics)                 // end-of-query metrics for the trust footer (M1 observability)
     case state(TerminalState)   // non-answer outcome, still a defined output
     case done
 }
@@ -180,6 +182,9 @@ public struct QueryService: QueryServing {
     let logSink: QueryLogSink
     let modelId: String?
     let egressCounter: @Sendable () -> Int
+    /// Deep-observability bus for the dev dashboard. Nil in normal runs → every
+    /// emit is a no-op and no document text leaves the process.
+    let trace: DevTrace?
 
     public init(retriever: Retrieving, generator: Generating, spans: SpanResolver,
                 defaults: SearchDefaults, mountRoot: String, ingestIndex: IngestIndex? = nil,
@@ -203,7 +208,8 @@ public struct QueryService: QueryServing {
                 chatRecallEnabled: Bool = false,
                 logSink: QueryLogSink = NullQueryLogSink(),
                 modelId: String? = nil,
-                egressCounter: @escaping @Sendable () -> Int = { 0 }) {
+                egressCounter: @escaping @Sendable () -> Int = { 0 },
+                trace: DevTrace? = nil) {
         self.chatRecallEnabled = chatRecallEnabled
         self.emptyFallback = emptyFallback
         self.tone = tone
@@ -230,50 +236,100 @@ public struct QueryService: QueryServing {
         self.logSink = logSink
         self.modelId = modelId
         self.egressCounter = egressCounter
+        self.trace = trace
     }
 
-    private func finishQuery(_ tracker: inout QueryLogTracker,
+    /// Single finish point for every terminal path: stamp the trust-footer
+    /// metrics, emit them just before `.done`, then flush the log line.
+    private func finishQuery(_ tracker: inout QueryLogTracker, egressBaseline: Int,
                              continuation: AsyncThrowingStream<QueryEvent, Error>.Continuation) async {
-        await tracker.emit(to: logSink, egressBlockedCount: egressCounter())
+        // Per-query egress = calls blocked DURING this query, never the process total.
+        let delta = max(0, egressCounter() - egressBaseline)
+        let entry = tracker.finalize(egressBlockedCount: delta)
+        continuation.yield(.metrics(QueryMetrics(
+            firstTokenMs: entry.firstTokenMs, totalMs: entry.totalMs,
+            contextTokens: entry.contextTokenCount,
+            verificationPassRate: entry.verificationPassRate,
+            egressBlockedCount: delta)))
+        continuation.yield(.done)
+        if let trace {
+            let metrics: JSONValue = .object([
+                "firstTokenMs": entry.firstTokenMs.map(JSONValue.int) ?? .null,
+                "totalMs": entry.totalMs.map(JSONValue.int) ?? .null,
+                "hops": entry.retrievalHopCount.map(JSONValue.int) ?? .null,
+                "contextTokens": entry.contextTokenCount.map(JSONValue.int) ?? .null,
+                "passRate": entry.verificationPassRate.map(JSONValue.double) ?? .null,
+                "egress": .int(delta),
+            ])
+            await trace.append(queryId: entry.queryId, atMs: entry.totalMs ?? 0, stage: "terminal",
+                               phase: "info", durationMs: nil, message: entry.terminalState,
+                               data: .object(["state": .string(entry.terminalState ?? "")]))
+            await trace.append(queryId: entry.queryId, atMs: entry.totalMs ?? 0, stage: "done",
+                               phase: "end", durationMs: entry.totalMs, message: nil,
+                               data: .object(["metrics": metrics]))
+        }
+        await logSink.emit(entry)
         continuation.finish()
+    }
+
+    /// Whole milliseconds since `start`, clamped at 0 — for per-stage trace timing.
+    private static func elapsedMs(since start: Date) -> Int {
+        max(0, Int(Date().timeIntervalSince(start) * 1000))
     }
 
     public func ask(_ q0: String, history: [Turn] = []) -> AsyncThrowingStream<QueryEvent, Error> {
         AsyncThrowingStream(QueryEvent.self) { continuation in
             let task = Task {
                 var tracker = QueryLogTracker(modelId: modelId)
+                let egressBaseline = egressCounter()   // per-query egress is the delta from here
+                // Deep trace (dev dashboard only) — shares the log's queryId; nil in normal runs.
+                let tracer = trace.map { QueryTracer(queryId: tracker.entry.queryId, trace: $0) }
                 do {
-                    // 1. Route; escalate genuinely ambiguous queries to the model (#4).
+                    // Out-of-scope / chit-chat (#9) is a synchronous gate. It
+                    // must run before routing because ambiguous greetings would
+                    // otherwise queue behind the local model just to discover
+                    // that no retrieval or generation was needed.
+                    if !ScopeClassifier.isCorpusQuestion(q0) {
+                        await tracer?.event("scope", "info", message: "out of scope",
+                                            data: .object(["corpusQuestion": .bool(false),
+                                                           "reply": .string(ScopeClassifier.reply(for: q0))]))
+                        tracker.noteRouted(intent: "outOfScope", effort: "none")
+                        continuation.yield(.routed(intent: "outOfScope", effort: "none"))
+                        continuation.yield(.token(ScopeClassifier.reply(for: q0)))
+                        tracker.noteFirstToken()
+                        tracker.noteTerminal("outOfScope")
+                        await finishQuery(&tracker, egressBaseline: egressBaseline, continuation: continuation)
+                        return
+                    }
+                    await tracer?.event("scope", "info", message: "corpus question",
+                                        data: .object(["corpusQuestion": .bool(true)]))
+
+                    // 1. Route; escalate genuinely ambiguous corpus queries to the model (#4).
                     let routing = router.classify(q0)
                     var intent = routing.intent
-                    for event in routing.ambiguityEvents() { continuation.yield(event) }
                     if routing.ambiguous, let escalator { intent = await escalator.classify(q0) }
                     let effortTier = effort.forIntent(intent)
                     tracker.noteRouted(intent: intent.rawValue, effort: effortTier)
                     continuation.yield(.routed(intent: intent.rawValue, effort: effortTier))
-
-                    // Out-of-scope / chit-chat (#9): reply plainly, skip retrieval.
-                    if !ScopeClassifier.isCorpusQuestion(q0) {
-                        continuation.yield(.token(ScopeClassifier.reply(for: q0)))
-                        tracker.noteFirstToken()
-                        tracker.noteTerminal("outOfScope")
-                        continuation.yield(.done)
-                        await finishQuery(&tracker, continuation: continuation)
-                        return
-                    }
+                    for event in routing.ambiguityEvents() { continuation.yield(event) }
+                    await tracer?.event("route", "end", message: "\(intent.rawValue) / \(effortTier)",
+                                        data: .object(["intent": .string(intent.rawValue),
+                                                       "effort": .string(effortTier),
+                                                       "ambiguous": .bool(routing.ambiguous)]))
 
                     // Answer cache (#7): instant repeat, invalidated on corpus change.
                     let corpusVersion = await (ingestIndex?.documentCount ?? 0)
                     if let cache, history.isEmpty,
                        let cached = await cache.lookup(query: q0, container: defaults.container ?? "", corpusVersion: corpusVersion) {
+                        await tracer?.event("cache", "info", message: "hit", data: .object(["hit": .bool(true)]))
                         continuation.yield(.sources(cached.sources))
                         continuation.yield(.token(cached.answer))
                         tracker.noteFirstToken()
                         tracker.noteTerminal("cached")
-                        continuation.yield(.done)
-                        await finishQuery(&tracker, continuation: continuation)
+                        await finishQuery(&tracker, egressBaseline: egressBaseline, continuation: continuation)
                         return
                     }
+                    await tracer?.event("cache", "info", message: "miss", data: .object(["hit": .bool(false)]))
 
                     // Query rewriting (#2): skip for short lookup queries (A-047 latency).
                     let q: String
@@ -281,6 +337,10 @@ public struct QueryService: QueryServing {
                         q = q0
                     } else {
                         q = await rewriter?.rewrite(q0) ?? q0
+                    }
+                    if q != q0 {
+                        await tracer?.event("rewrite", "info", message: "rewritten",
+                                            data: .object(["from": .string(q0), "to": .string(q)]))
                     }
 
                     // Fetch profile concurrently with retrieval (pipelining).
@@ -291,9 +351,18 @@ public struct QueryService: QueryServing {
 
                     // 2. Gather evidence: decompose (#10) → search → escalate (#1) →
                     //    agentic multi-hop (#1) → time-filter (#5).
+                    let tRetrieve = Date()
                     let gathered = try await gatherEvidence(q, intent: intent)
+                    continuation.yield(.stage(name: "retrieve", elapsedMs: Self.elapsedMs(since: tRetrieve)))
                     let hits = gathered.hits
                     let broadened = gathered.broadened
+                    await tracer?.event("gather.search", "end", message: "\(hits.count) candidates",
+                        data: .object(["candidates": .array(hits.prefix(20).map { (h) -> JSONValue in
+                            .object(["title": .string(h.source.title), "path": .string(h.source.path),
+                                     "score": .double(h.similarity),
+                                     "aboveThreshold": .bool(h.similarity >= defaults.threshold),
+                                     "snippet": .string(String((h.context ?? h.memory).prefix(200)))])
+                        })]))
                     if hits.isEmpty {
                         // Honesty about readiness (AT-M2.3): if anything is still
                         // being ingested, say "indexing", never a false refusal.
@@ -302,16 +371,14 @@ public struct QueryService: QueryServing {
                             if let pending = await index.pendingPaths().first {
                                 continuation.yield(.state(.indexing(path: pending)))
                                 tracker.noteTerminal("indexing")
-                                continuation.yield(.done)
-                                await finishQuery(&tracker, continuation: continuation)
+                                await finishQuery(&tracker, egressBaseline: egressBaseline, continuation: continuation)
                                 return
                             }
                             // First-run: no files at all → onboarding, not a refusal.
                             if await index.documentCount == 0 {
                                 continuation.yield(.state(.emptyCorpus))
                                 tracker.noteTerminal("emptyCorpus")
-                                continuation.yield(.done)
-                                await finishQuery(&tracker, continuation: continuation)
+                                await finishQuery(&tracker, egressBaseline: egressBaseline, continuation: continuation)
                                 return
                             }
                         }
@@ -327,14 +394,12 @@ public struct QueryService: QueryServing {
                             }.filter { seenN.insert($0.docId).inserted }
                             for event in CorpusSuggester.emptyEvidenceEvents(nearest: cards) { continuation.yield(event) }
                             tracker.noteTerminal("emptyNearest")
-                            continuation.yield(.done)
-                            await finishQuery(&tracker, continuation: continuation)
+                            await finishQuery(&tracker, egressBaseline: egressBaseline, continuation: continuation)
                             return
                         }
                         for event in Coverage.emptyEvidenceEvents() { continuation.yield(event) }
                         tracker.noteTerminal("empty")
-                        continuation.yield(.done)
-                        await finishQuery(&tracker, continuation: continuation)
+                        await finishQuery(&tracker, egressBaseline: egressBaseline, continuation: continuation)
                         return
                     }
                     // Literal-keyword backstop: if a salient query term never
@@ -349,6 +414,9 @@ public struct QueryService: QueryServing {
                         if let note {
                             gathered2 = rescued
                             backstopSteps.append(note)
+                            await tracer?.event("backstop", "info", message: note,
+                                                data: .object(["triggered": .bool(true),
+                                                               "rescued": .int(rescued.count)]))
                             if documentSearchEnabled, let docSearcher = retriever as? DocumentSearching,
                                let chunkHits = try? await docSearcher.searchDocuments(q0, container: defaults.container, limit: 3) {
                                 let existing = Set(gathered2.map { $0.memory.prefix(120) })
@@ -429,13 +497,25 @@ public struct QueryService: QueryServing {
                         for try await tok in generator.stream(system: system, prompt: basePrompt) {
                             text += tok
                             tracker.noteFirstToken()
+                            await tracer?.event("generate", "token", data: .object(["tokenText": .string(tok)]))
                             continuation.yield(.token(tok))
                         }
                         return text
                     }
                     let system = Prompt.compose(preamble: assembled.preamble, effort: genEffort, style: directive)
+                    await tracer?.event("assemble", "end", message: "\(assembled.evidence.count) chunks",
+                        data: .object(["system": .string(system),
+                                       "context": .string(Prompt.context(assembled.evidence)),
+                                       "question": .string(q0),
+                                       "contextTokens": .int(assembled.evidence.reduce(0) { $0 + $1.memory.count / 4 })]))
+                    let tGenerate = Date()
                     var answer = try await generate(system: system)
+                    continuation.yield(.stage(name: "generate", elapsedMs: Self.elapsedMs(since: tGenerate)))
+                    let tVerify = Date()
                     var verdicts = await verifier?.verify(answer: answer, evidence: assembled.evidence)
+                    if verifier != nil {
+                        continuation.yield(.stage(name: "verify", elapsedMs: Self.elapsedMs(since: tVerify)))
+                    }
 
                     if selfCorrect, let v = verdicts, CitationVerifier.allUnsupported(v) {
                         continuation.yield(.retrying("That wasn't grounded — reconsidering using only your files…"))
@@ -445,14 +525,25 @@ public struct QueryService: QueryServing {
                         answer = try await generate(system: strict)
                         verdicts = await verifier?.verify(answer: answer, evidence: assembled.evidence)
                     }
+                    await tracer?.event("generate", "end", message: "\(answer.count) chars",
+                                        data: .object(["answer": .string(answer)]))
 
                     // 5. Emit verification flags; wholly-ungrounded → defined state.
                     if let verifier, let v = verdicts {
+                        var verdictArr: [JSONValue] = []
+                        var supportedCount = 0
                         for event in verifier.citationEvents(v) {
-                            if case let .citation(_, supported) = event {
+                            if case let .citation(idx, supported) = event {
                                 tracker.noteCitation(supported: supported)
+                                if supported { supportedCount += 1 }
+                                verdictArr.append(.object(["sentence": .int(idx), "supported": .bool(supported)]))
                             }
                             continuation.yield(event)
+                        }
+                        if !verdictArr.isEmpty {
+                            await tracer?.event("verify", "end",
+                                data: .object(["verdicts": .array(verdictArr),
+                                               "passRate": .double(Double(supportedCount) / Double(verdictArr.count))]))
                         }
                         if CitationVerifier.allUnsupported(v) {
                             continuation.yield(.state(.unsupportedAnswer))
@@ -485,13 +576,11 @@ public struct QueryService: QueryServing {
                             messages: [("user", q0), ("assistant", answer)],
                             container: chatContainer)
                     }
-                    continuation.yield(.done)
-                    await finishQuery(&tracker, continuation: continuation)
+                    await finishQuery(&tracker, egressBaseline: egressBaseline, continuation: continuation)
                 } catch {
                     for event in Self.lifecycleRetryEvents() { continuation.yield(event) }
                     tracker.noteTerminal("engineUnreachable")
-                    continuation.yield(.done)
-                    await finishQuery(&tracker, continuation: continuation)
+                    await finishQuery(&tracker, egressBaseline: egressBaseline, continuation: continuation)
                 }
             }
             continuation.onTermination = { _ in task.cancel() }
@@ -515,6 +604,13 @@ public struct QueryService: QueryServing {
 
     private func absolutePath(_ enginePath: String) -> String {
         guard !enginePath.isEmpty, !mountRoot.isEmpty, enginePath.hasPrefix("/") else { return enginePath }
+        if enginePath == mountRoot || enginePath.hasPrefix(mountRoot + "/") {
+            return enginePath
+        }
+        if enginePath.hasPrefix("/Volumes/")
+            || FileManager.default.fileExists(atPath: enginePath) {
+            return enginePath
+        }
         return mountRoot + enginePath
     }
 

@@ -55,17 +55,21 @@ public actor ProcessSupervisor {
         if !(await waitUntilUp(p)) { throw SupervisorError.failedToStart(p) }
     }
 
-    func waitUntilUp(_ p: ManagedProcess, attempts: Int = 20) async -> Bool {
-        for _ in 0..<attempts {
-            if await probe.isUp(healthURL(p)) { return true }
-            try? await Task.sleep(for: .milliseconds(250))
+    func waitUntilUp(_ p: ManagedProcess, attempts: Int? = nil) async -> Bool {
+        let intervalMs = max(1, config.health.probeIntervalMs)
+        let configuredAttempts = max(1, config.engine.timeoutMs / intervalMs)
+        for _ in 0..<(attempts ?? configuredAttempts) {
+            let address = await launcher.boundAddress(p)
+            if address != nil, await probe.isUp(healthURL(p)) { return true }
+            try? await Task.sleep(for: .milliseconds(intervalMs))
         }
         return false
     }
 
     func state(_ p: ManagedProcess) async -> ProcessState {
         let addr = await launcher.boundAddress(p)
-        let up = await probe.isUp(healthURL(p))
+        var up = false
+        if addr != nil { up = await probe.isUp(healthURL(p)) }
         return ProcessState(name: p.rawValue, isRunning: up, boundAddress: addr)
     }
 

@@ -101,3 +101,11 @@ retry_count = 2
 
 [inspector]
 suppression_ttl_days = 365
+
+[devtools]
+# Local developer observability dashboard — loopback-only, OFF by default, never
+# shipped. When enabled, MnemoApp serves a live deep trace of the query pipeline
+# at http://127.0.0.1:<port>/ (token printed to stderr at launch). Also togglable
+# without editing config via the MNEMO_DEVTOOLS=1 environment variable.
+enabled = false
+port = 7878

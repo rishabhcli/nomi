@@ -39,24 +39,28 @@ Read from `NSScreen` at layout time. Pure math in `NotchGeometry` (`Sources/Mnem
 
 ## 3. The surface shape — `NotchShape` (the seamless blend)
 
-The silhouette is a **solid black extension** of the hardware notch:
+The silhouette is a **solid black extension** of the hardware notch — "the notch grown wider":
 
-- **Top corners:** square, full-bleed, flush with the screen top (radius 0).
-- **Bottom corners:** convex rounding only; radius grows as the body expands.
+- **Top edge:** full-bleed, flush with the screen top (invariant **F3**). The two top corners are **concave shoulders** — the inset side walls flare back out to that edge, exactly as the hardware notch meets the menu bar.
+- **Bottom corners:** convex rounding; radius grows as the body expands.
+- **Continuous curvature:** all four corners are squircle-leaning cubic Béziers, not plain arcs.
+- **Shoulder:** `Surface.shoulderRadius` = 12pt expanded, `Surface.idleShoulder` = 5pt collapsed; clamps to 0 where there is no room (the voice drop's semicircle).
 - **Idle:** hardware-like micro-radius (`Surface.idleRadius` = 9pt).
 - **Expanded:** generous bottom radius (`Surface.bottomRadius` = 46pt).
 
-Pure path: `NotchShapeGeometry.path(in:bottomCornerRadius:)` — tested in `NotchShapeGeometryTests`.
+Pure path: `NotchShapeGeometry.path(in:topCornerRadius:bottomCornerRadius:)` — tested in `NotchShapeGeometryTests`.
 
-| State | `bottomCornerRadius` | Visual |
+| State | shoulder / bottom | Visual |
 |-------|------------------------|--------|
-| Idle / collapsed | 8–9 | Matches hardware pill |
-| Input | 46 | Wide tray, home-indicator pill |
-| Searching | 46 | Same width; spinner in tray |
-| Answering | 46 | Body grows downward; answer scrolls |
-| Voice drop | semicircle pendant | Narrow (`Surface.dropWidth` = 176pt); orb inside |
+| Idle / collapsed | 5 / 8–9 | Matches hardware pill |
+| Input | 12 / 46 | Wide tray, home-indicator pill |
+| Searching | 12 / 46 | Same width; spinner in tray |
+| Answering | 12 / 46 | Body grows downward; answer scrolls |
+| Voice drop | 0 / semicircle | Narrow (`Surface.dropWidth` = 176pt); orb inside |
 
-**AT-M12.1b:** concave-shoulder behavior superseded by square-top redesign (2026-07-09); bottom radius grows with body height — `testBottomCornersAreRounded`, `testRadiusClampsOnTinyRects`.
+The bottom **Liquid Glass** rises through the bottom `Surface.glassFraction` (≈ 1/3) of the surface and the opaque-black body **fades out** across it — one seamless melt from pure black at the top to translucent glass at the bottom (the desktop shows through). The glass is drawn behind the body so it samples the desktop; one `GlassEffectContainer` groups all glass (F5).
+
+**AT-M12.1b:** concave shoulders with a full-bleed flush top edge; bottom radius grows with body height — `testTopCornersAreConcaveShoulders`, `testTopEdgeIsFullBleed`, `testBottomCornersAreRounded`, `testRadiusClampsOnTinyRects`.
 
 ---
 
@@ -68,21 +72,23 @@ From `Surface` enum (`Sources/MnemoApp/Motion.swift`):
 |-------|-------|------|
 | `inputWidth` / `readWidth` | 520pt | **Same width** for input ↔ searching ↔ answer — pure vertical morph, no sideways jump |
 | `bandHeight` | 60pt | Controls row inside glass tray |
-| `bandFade` | 34pt | Black body → glass tray blend zone |
+| `bandFade` | 34pt | Empty zone above controls (the glass fade rises behind it) |
 | `trayHandle` | 20pt | Home-indicator zone below controls |
 | `trayHeight` | 114pt | `bandFade + bandHeight + trayHandle` |
+| `shoulderRadius` / `idleShoulder` | 12 / 5pt | Concave top-corner shoulder (expanded / collapsed) |
+| `glassFraction` | 0.36 | Bottom Liquid Glass region as a fraction of surface height |
 | `answerCap` | 400pt | Answer zone max before scroll |
 | `answerFont` | 17pt | Reading-grade white text on black body |
 | `maxBodyHeight` | 560pt | Panel sizing bound |
 | `dropWidth` | 176pt | Voice pendant width (never widens the notch) |
 | `dropBody` | 188pt | Pendant length below notch |
-| `orbDiameter` | 120pt | Listening orb diameter |
+| `orbDiameter` | 132pt | Listening orb diameter |
 | `homeIndicatorW` × `homeIndicatorH` | 40 × 5pt | Tray bottom pill |
 | `trayTint` | 0.74 | Dark glass — desktop samples through but stays premium |
 | `shadowRadius` / `shadowY` / `shadowOpacity` | 32 / 11 / 0.36 | Floating depth |
 | `spinnerRing` / `spinnerDot` / `spinnerRPS` | 18 / 2.5 / 1.0 | Six-dot ring while searching |
 
-**Material stack:** opaque `#000` body (continues notch) + dark translucent Liquid Glass tray on the bottom curve only. One `GlassEffectContainer`; shared `glassEffectID` + `@Namespace` for notch → input → answer morph.
+**Material stack:** opaque `#000` body (continues notch) with **Liquid Glass rising through the bottom `glassFraction`** — the black body fades out across it so glass melts up into black with no seam (the desktop shows through the bottom). The glass is drawn behind the body so it samples the desktop. One `GlassEffectContainer` groups all glass (bottom material + recovery buttons); shared `glassEffectID` + `@Namespace` for notch → input → answer morph.
 
 ---
 
@@ -130,8 +136,8 @@ Signature content swap (`Motion.blurMorph`):
 
 | Phase | Blur | Scale | Opacity |
 |-------|------|-------|---------|
-| Outgoing removal | 0 → 6pt | 1.0 → 0.988 | 1 → 0 |
-| Incoming insertion | 8 → 0pt (starts 5) | 1.03 → 1.0 (starts 1.012) | 0 → 1 |
+| Outgoing removal | 0 → 9pt | 1.0 → 0.975 | 1 → 0 |
+| Incoming insertion | 8 → 0pt | 1.025 → 1.0 | 0 → 1 |
 
 **Reduce Motion:** `.opacity` only — no blur, no scale.
 

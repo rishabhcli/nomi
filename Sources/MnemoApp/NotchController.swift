@@ -14,6 +14,8 @@ final class NotchController {
     let handler: AppCommandHandler
     let notchRect: CGRect
     let screenFrame: CGRect
+    /// Deep-observability bus for the dev dashboard; nil unless devtools enabled.
+    let devTrace: DevTrace?
     private var syncTask: Task<Void, Never>?
 
     init(config: MnemoConfig) {
@@ -42,6 +44,11 @@ final class NotchController {
         let smfsKey = (try? String(contentsOfFile: NSHomeDirectory() + "/.supermemory/data/api-key", encoding: .utf8))?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let maxHops = config.agentic.maxHops
+        // Dev observatory (loopback, off by default): one bus, injected into every
+        // query service and read by the dashboard's SSE server. Nil in normal runs.
+        let devTrace: DevTrace? = (config.devtools.enabled
+            || ProcessInfo.processInfo.environment["MNEMO_DEVTOOLS"] == "1") ? DevTrace() : nil
+        self.devTrace = devTrace
         func makeService(_ container: String, _ tone: ResponseTone) -> QueryServing {
             // Agentic multi-hop over the mount (intelligence #1).
             let agentic = AgenticGrep(
@@ -78,7 +85,14 @@ final class NotchController {
                 selfCorrect: true,
                 documentSearchEnabled: true,
                 conversationSink: engine,
-                chatRecallEnabled: true)
+                chatRecallEnabled: true,
+                // M1a: stop discarding observability in the GUI path — record the
+                // query log, stamp the model id, and report the PER-QUERY egress
+                // delta so the notch trust footer reads real "0 outbound".
+                logSink: QueryLogSinkFactory.make(config: config.logging),
+                modelId: config.model.synthesis,
+                egressCounter: { LoopbackGuardURLProtocol.blockedCount },
+                trace: devTrace)
         }
         let handler = AppCommandHandler(engine: engine, config: config, container: "mnemo")
         self.handler = handler
@@ -126,7 +140,7 @@ final class NotchController {
         dictation.onEndpoint = { [weak self] in
             guard let self else { return }
             self.dictation.stop()
-            if !self.vm.state.query.isEmpty { Task { await self.vm.submit() } }
+            if !self.vm.state.query.isEmpty { self.vm.beginSubmit() }
         }
     }
 
@@ -153,14 +167,15 @@ final class NotchController {
     /// idle, dictating, or streaming — those must not auto-close.
     var mouseOutHotRect: CGRect? {
         let phase = vm.state.phase
-        // Also nil while a query streams (phase is .answering mid-stream): a
-        // mouse-out must not tear down an in-flight answer, and leaving no idle
-        // state to re-summon from is what stops the duplicate-session bug.
-        guard phase != .idle, phase != .searching, !dictation.isListening, !vm.isQuerying else { return nil }
-        let width = (phase == .input ? Surface.inputWidth : Surface.readWidth) + 140
-        let bodyHeight: CGFloat = phase == .input
-            ? Surface.trayHeight
-            : Surface.answerCap + 12 + Surface.trayHeight
+        let hasDraft = !vm.state.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        guard NotchHover.shouldAutoCollapse(
+            phase: phase,
+            hasDraft: hasDraft,
+            isListening: dictation.isListening,
+            isQuerying: vm.isQuerying
+        ) else { return nil }
+        let width = Surface.inputWidth + 140
+        let bodyHeight = Surface.trayHeight
         let h = notchRect.height + bodyHeight + 90
         return CGRect(x: notchRect.midX - width / 2, y: screenFrame.maxY - h, width: width, height: h)
     }

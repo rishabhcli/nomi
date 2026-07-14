@@ -20,7 +20,8 @@ static float3 hsv2rgb(float3 c) {
 
 [[ stitchable ]]
 half4 voiceOrb(float2 pos, half4 color, float2 size,
-               float time, float amplitude, float hueShift) {
+               float time, float amplitude,
+               float waveHeight, float brightness, float saturation) {
     float2 uv = (pos / size) * 2.0 - 1.0;          // center to [-1,1]
     float r = length(uv);
     if (r > 1.0) return half4(0.0);                 // outside the sphere
@@ -37,15 +38,16 @@ half4 voiceOrb(float2 pos, half4 color, float2 size,
                + 0.28 * sin(uv.x * 9.1 + time * 3.0 + 4.1);
     float yDiv = clamp((wave / 1.83) * (0.10 + amp * 0.38), -0.35, 0.50);
 
-    // Band half-height: idle seam 0.05 → 0.55 of the sphere at full voice.
-    float bandHalf = min(0.05 + amp * 0.50, 0.80);
+    // Band half-height comes straight from OrbUniforms.waveHeight (the single,
+    // unit-tested amplitude→visual mapping — no divergent re-derivation here).
+    float bandHalf = clamp(waveHeight, 0.0, 0.80);
     float d = uv.y - yDiv;
     float band = pow(smoothstep(bandHalf, 0.0, abs(d)), 1.4);
 
-    // Spectral gradient along x, rotating slowly; sat/val track amplitude.
-    float hue = fract(uv.x * 0.35 + time * 0.15 + hueShift);
-    float sat = 0.15 + amp * 0.85;
-    float val = (0.25 + amp * 0.75) * band;
+    // Spectral gradient along x, rotating slowly; sat/val from OrbUniforms.
+    float hue = fract(uv.x * 0.35 + time * 0.15);
+    float sat = saturation;
+    float val = brightness * band;
     float3 rgb = hsv2rgb(float3(hue, sat, val));
 
     // Two-tone: warm crest above the divide, cool trough below [measured].
@@ -70,10 +72,16 @@ half4 voiceOrb(float2 pos, half4 color, float2 size,
     float innerShadow = pow(max(0.0, uv.y), 3.0) * smoothstep(0.5, 1.0, r) * 0.35;
 
     // Dark glass base + fresnel rim (rim brightens slightly with amplitude —
-    // the non-color amplitude cue, §12.6).
-    float3 glassBase = float3(0.03, 0.03, 0.045) + fresnel * 0.22 * (1.0 + 0.5 * amp);
+    // the non-color amplitude cue, §12.6). The base is lifted enough that the
+    // sphere reads as a present piece of glass even at silence (contrast).
+    float3 glassBase = float3(0.055, 0.055, 0.075) + fresnel * 0.30 * (1.0 + 0.5 * amp);
     float3 outc = glassBase + rgb + reflArc;
     outc *= (1.0 - innerShadow);
+
+    // Hash dither (±1/255) removes visible banding on the dark gradient — a
+    // cheap, real smoothness win.
+    float dither = (fract(sin(dot(pos, float2(12.9898, 78.233))) * 43758.5453) - 0.5) / 255.0;
+    outc += dither;
 
     float alpha = max(band, 0.90) * aa;
     return half4(half3(clamp(outc, 0.0, 1.4) * aa), half(alpha));

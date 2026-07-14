@@ -21,7 +21,8 @@ public struct SystemProcessLauncher: ProcessLauncher {
         case .ollama:
             // Managed externally (launchd / brew services). If it is not up yet, start it.
             if await boundAddress(.ollama) == nil {
-                try run("/usr/bin/env", ["brew", "services", "start", "ollama"])
+                let status = try run("/usr/bin/env", ["brew", "services", "start", "ollama"])
+                guard status == 0 else { throw LaunchError.commandFailed("brew services start ollama", status) }
             }
             _ = try await ensureModelResident()
         case .engine:
@@ -33,9 +34,14 @@ public struct SystemProcessLauncher: ProcessLauncher {
             guard let bin = which("smfs") else { throw LaunchError.binaryNotFound("smfs") }
             let mountPoint = (config.smfs.mountPoint as NSString).expandingTildeInPath
             try FileManager.default.createDirectory(atPath: mountPoint, withIntermediateDirectories: true)
-            try run(bin, ["mount", "mnemo", "--path", mountPoint,
-                          "--api-url", config.smfs.backingStore.absoluteString,
-                          "--backend", "nfs"])
+            let mounts = (try? capture("/sbin/mount", [])) ?? ""
+            if mounts.contains(" on \(mountPoint) ") {
+                _ = try? run(bin, ["unmount", mountPoint])
+            }
+            let status = try run(bin, ["mount", "mnemo", "--path", mountPoint,
+                                       "--api-url", config.smfs.backingStore.absoluteString,
+                                       "--backend", "nfs"])
+            guard status == 0 else { throw LaunchError.commandFailed("smfs mount", status) }
         }
     }
 
@@ -46,7 +52,10 @@ public struct SystemProcessLauncher: ProcessLauncher {
         case .engine:
             _ = try? run("/usr/bin/pkill", ["-f", "supermemory-server"])
         case .smfs:
-            if let bin = which("smfs") { _ = try? run(bin, ["unmount", "mnemo"]) }
+            if let bin = which("smfs") {
+                let mountPoint = (config.smfs.mountPoint as NSString).expandingTildeInPath
+                _ = try? run(bin, ["unmount", mountPoint])
+            }
         }
     }
 
@@ -59,10 +68,20 @@ public struct SystemProcessLauncher: ProcessLauncher {
             let out = (try? capture("/usr/sbin/lsof", ["-iTCP:\(port)", "-sTCP:LISTEN", "-n", "-P"])) ?? ""
             return LoopbackAudit.parseLSOF(out).first?.address
         case .smfs:
-            // A live NFS mount at the memory-path is the "address" for smfs.
+            // A mount-table entry alone can be a dead NFS mount. Require the
+            // SMFS daemon registry and its loopback listener as well.
             let mountPoint = (config.smfs.mountPoint as NSString).expandingTildeInPath
-            let out = (try? capture("/sbin/mount", [])) ?? ""
-            return out.contains(mountPoint) ? "127.0.0.1:nfs" : nil
+            let mounts = (try? capture("/sbin/mount", [])) ?? ""
+            guard mounts.contains(" on \(mountPoint) "), let bin = which("smfs") else { return nil }
+            let daemonList = (try? capture(bin, ["list"])) ?? ""
+            guard daemonList.contains(mountPoint) else { return nil }
+            let listeners = (try? capture(
+                "/usr/sbin/lsof",
+                ["-iTCP:11111", "-sTCP:LISTEN", "-n", "-P"]
+            )) ?? ""
+            let live = LoopbackAudit.parseLSOF(listeners)
+                .contains { LoopbackAudit.isLoopbackAddress($0.address) }
+            return live ? "127.0.0.1:11111" : nil
         }
     }
 
@@ -96,6 +115,7 @@ public struct SystemProcessLauncher: ProcessLauncher {
     public enum LaunchError: Error, Equatable {
         case binaryNotFound(String)
         case modelNotLoaded(String)
+        case commandFailed(String, Int32)
     }
 
     func engineBinaryPath() -> String? {

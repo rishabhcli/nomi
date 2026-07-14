@@ -9,9 +9,22 @@ struct ReasoningTraceView: View {
     let status: String
     let understanding: String
     let phase: NotchPhase
+    let hasAnswer: Bool
     let reduceMotion: Bool
-    @State private var expanded = true
+    @State private var expanded: Bool
     @Environment(\.colorSchemeContrast) private var colorContrast
+
+    init(steps: [String], status: String, understanding: String, phase: NotchPhase,
+         hasAnswer: Bool, reduceMotion: Bool) {
+        self.steps = steps
+        self.status = status
+        self.understanding = understanding
+        self.phase = phase
+        self.hasAnswer = hasAnswer
+        self.reduceMotion = reduceMotion
+        // Collapsed by default once an answer is present (progressive live-trace).
+        _expanded = State(initialValue: SurfaceUX.ReasoningTrace.startsExpanded(hasAnswer: hasAnswer))
+    }
 
     private var highContrast: Bool { colorContrast == .increased }
 
@@ -91,7 +104,7 @@ struct ReasoningTraceView: View {
     }
 
     private var shouldShow: Bool {
-        SurfaceUX.ReasoningTrace.shouldShow(phase: phase, itemCount: items.count, hasAnswer: false)
+        SurfaceUX.ReasoningTrace.shouldShow(phase: phase, itemCount: items.count)
     }
 }
 

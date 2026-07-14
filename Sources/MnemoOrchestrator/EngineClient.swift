@@ -99,7 +99,7 @@ public struct EngineClient: Retrieving {
     static func mapWireResult(_ w: WireResult) -> Retrieved? {
         guard let text = w.memory ?? w.chunk else { return nil }
         let doc = w.documents?.first
-        let path = w.filepath ?? w.metadata?.strings[MediaCompanion.originalPathKey] ?? ""
+        let path = w.metadata?.strings[MediaCompanion.originalPathKey] ?? w.filepath ?? ""
         return Retrieved(
             memory: text,
             similarity: w.similarity ?? 0,
@@ -145,7 +145,9 @@ extension EngineClient: DocumentFetching {
         guard let http = resp as? HTTPURLResponse else { throw EngineError.notHTTP }
         guard http.statusCode == 200 else { return nil }
         let d = try JSONDecoder().decode(DocResponse.self, from: data)
-        return DocumentRecord(content: d.content, filepath: d.filepath,
+        return DocumentRecord(
+            content: d.content,
+            filepath: d.metadata?.strings[MediaCompanion.originalPathKey] ?? d.filepath,
                               metadata: d.metadata?.strings)
     }
 }
@@ -205,7 +207,10 @@ extension EngineClient: DocumentIndexing {
             guard http.statusCode == 200 else { throw EngineError.httpStatus(http.statusCode) }
             let decoded = try JSONDecoder().decode(DocumentListPage.self, from: data)
             out += decoded.memories.map {
-                DocumentMeta(id: $0.id, filepath: $0.filepath, title: $0.title?.cleanedTitle,
+                DocumentMeta(
+                    id: $0.id,
+                    filepath: $0.metadata?.strings[MediaCompanion.originalPathKey] ?? $0.filepath,
+                    title: $0.title?.cleanedTitle,
                              status: $0.status, containerTags: $0.containerTags,
                              summary: $0.summary, updatedAt: $0.updatedAt,
                              metadata: $0.metadata?.strings)

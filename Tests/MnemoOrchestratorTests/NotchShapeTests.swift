@@ -2,40 +2,64 @@ import XCTest
 import CoreGraphics
 @testable import MnemoOrchestrator
 
-/// UI.md §3 — the Notch Nook silhouette: solid surface with SQUARE top corners
-/// flush against the screen top, rounded bottom corners only.
+/// UI.md §3 — the notch silhouette: a full-bleed top EDGE with concave
+/// "shoulders" that flare the inset side walls out to the screen top (the
+/// MacBook-notch look), plus convex rounded bottom corners. Continuous-curvature
+/// corners. The top edge stays flush/full-bleed (invariant F3).
 final class NotchShapeGeometryTests: XCTestCase {
     private let rect = CGRect(x: 0, y: 0, width: 500, height: 300)
-    private var path: CGPath { NotchShapeGeometry.path(in: rect, bottomCornerRadius: 34) }
+    private var path: CGPath {
+        NotchShapeGeometry.path(in: rect, topCornerRadius: 20, bottomCornerRadius: 34)
+    }
 
-    func testTopCornersAreSquareAndFullBleed() {
-        // The extreme top corners belong to the surface (radius 0, flush).
-        XCTAssertTrue(path.contains(CGPoint(x: 1, y: 1)))
-        XCTAssertTrue(path.contains(CGPoint(x: 499, y: 1)))
-        XCTAssertTrue(path.contains(CGPoint(x: 250, y: 1)))
+    func testTopEdgeIsFullBleed() {
+        // The center of the top edge belongs to the surface — flush, full width.
+        XCTAssertTrue(path.contains(CGPoint(x: 250, y: 2)))
+        // A point well inside is filled.
+        XCTAssertTrue(path.contains(CGPoint(x: 100, y: 150)))
+    }
+
+    func testTopCornersAreConcaveShoulders() {
+        // The extreme top corners are SCOOPED OUT by the concave shoulder — the
+        // wall is inset, so the outer corner wedge is not part of the surface.
+        XCTAssertFalse(path.contains(CGPoint(x: 2, y: 2)))
+        XCTAssertFalse(path.contains(CGPoint(x: 498, y: 2)))
+    }
+
+    func testSideWallsAreInsetByTheShoulder() {
+        // Below the shoulder the walls sit at x = topCornerRadius (20): the
+        // outer margin is outside, and just inside the wall is filled.
+        XCTAssertFalse(path.contains(CGPoint(x: 5, y: 150)))
+        XCTAssertFalse(path.contains(CGPoint(x: 495, y: 150)))
+        XCTAssertTrue(path.contains(CGPoint(x: 30, y: 150)))
+        XCTAssertTrue(path.contains(CGPoint(x: 470, y: 150)))
     }
 
     func testBottomCornersAreRounded() {
         // The extreme bottom corners are cut by the convex rounding…
         XCTAssertFalse(path.contains(CGPoint(x: 2, y: 298)))
         XCTAssertFalse(path.contains(CGPoint(x: 498, y: 298)))
-        // …while the bottom-center edge and the inset corner region are filled.
+        // …while the bottom-center edge is filled.
         XCTAssertTrue(path.contains(CGPoint(x: 250, y: 298)))
-        XCTAssertTrue(path.contains(CGPoint(x: 40, y: 296)))
-    }
-
-    func testSidesAreStraight() {
-        XCTAssertTrue(path.contains(CGPoint(x: 1, y: 150)))
-        XCTAssertTrue(path.contains(CGPoint(x: 499, y: 150)))
     }
 
     func testRadiusClampsOnTinyRects() {
-        // Idle: the notch rect itself with hardware-like rounding — the radius
-        // clamps so the path stays valid.
+        // Idle: the notch rect itself with hardware-like rounding — the radii
+        // clamp so the path stays valid.
         let idle = CGRect(x: 0, y: 0, width: 185, height: 32)
-        let p = NotchShapeGeometry.path(in: idle, bottomCornerRadius: 8)
+        let p = NotchShapeGeometry.path(in: idle, topCornerRadius: 5, bottomCornerRadius: 8)
         XCTAssertTrue(p.contains(CGPoint(x: 92, y: 16)))
         XCTAssertFalse(p.contains(CGPoint(x: 1, y: 31)), "bottom corners still round at idle")
+    }
+
+    func testSemicircleDropClampsShoulderAway() {
+        // The listening drop uses bottomRadius = width/2 (semicircle); there is
+        // no room for a shoulder, so it clamps to 0 without a degenerate path,
+        // and the top edge stays full-bleed.
+        let drop = CGRect(x: 0, y: 0, width: 176, height: 200)
+        let p = NotchShapeGeometry.path(in: drop, topCornerRadius: 6, bottomCornerRadius: 88)
+        XCTAssertTrue(p.contains(CGPoint(x: 88, y: 2)), "top edge still full-bleed")
+        XCTAssertTrue(p.contains(CGPoint(x: 88, y: 100)))
     }
 }
 
@@ -82,5 +106,72 @@ final class HoverGeometryTests: XCTestCase {
         XCTAssertFalse(NotchHover.isOutside(cursor: CGPoint(x: 756, y: 900), hotRect: hot))
         XCTAssertTrue(NotchHover.isOutside(cursor: CGPoint(x: 756, y: 300), hotRect: hot))
         XCTAssertTrue(NotchHover.isOutside(cursor: CGPoint(x: 100, y: 900), hotRect: hot))
+    }
+
+    func testMouseOutOnlyAutoCollapsesAnEmptyInput() {
+        XCTAssertTrue(NotchHover.shouldAutoCollapse(
+            phase: .input, hasDraft: false, isListening: false, isQuerying: false))
+
+        XCTAssertFalse(NotchHover.shouldAutoCollapse(
+            phase: .input, hasDraft: true, isListening: false, isQuerying: false),
+            "moving the pointer must not discard a draft")
+        XCTAssertFalse(NotchHover.shouldAutoCollapse(
+            phase: .searching, hasDraft: true, isListening: false, isQuerying: true))
+        XCTAssertFalse(NotchHover.shouldAutoCollapse(
+            phase: .answering, hasDraft: true, isListening: false, isQuerying: false),
+            "a completed answer must remain visible until explicit dismissal")
+        XCTAssertFalse(NotchHover.shouldAutoCollapse(
+            phase: .state, hasDraft: true, isListening: false, isQuerying: false),
+            "recovery controls must remain visible until explicit dismissal")
+        XCTAssertFalse(NotchHover.shouldAutoCollapse(
+            phase: .input, hasDraft: false, isListening: true, isQuerying: false))
+    }
+
+    func testVoiceTargetMatchesOnlyTheNotchCollar() {
+        let target = NotchInteraction.voiceTargetRect(
+            surfaceWidth: 520,
+            notchSize: CGSize(width: 185, height: 32))
+
+        XCTAssertEqual(target, CGRect(x: 167.5, y: 0, width: 185, height: 32))
+        XCTAssertTrue(target.contains(CGPoint(x: 260, y: 16)))
+        XCTAssertFalse(target.contains(CGPoint(x: 260, y: 60)),
+                       "clicking the input or answer body must not start dictation")
+        XCTAssertFalse(target.contains(CGPoint(x: 40, y: 16)),
+                       "the expanded shoulders are not the voice control")
+    }
+
+    func testCancellingSearchReturnsToEditableQueryWithoutPartialOutput() {
+        var searching = NotchState(
+            phase: .searching,
+            query: "what is my build tool?",
+            answer: "partial",
+            sources: [SourceCard(title: "Draft", path: "/draft", docId: "d")]
+        )
+        searching.status = "Reading your files…"
+        searching.terminal = .engineUnreachable
+
+        let cancelled = NotchInteraction.cancelledState(searching)
+
+        XCTAssertEqual(cancelled.phase, .input)
+        XCTAssertEqual(cancelled.query, "what is my build tool?")
+        XCTAssertEqual(cancelled.answer, "")
+        XCTAssertEqual(cancelled.sources, [])
+        XCTAssertEqual(cancelled.status, "")
+        XCTAssertNil(cancelled.terminal)
+    }
+
+    func testThreeSourceChipsFitInsideTheReadingSurface() {
+        let textWidth = NotchInteraction.sourceChipTextWidth(
+            surfaceWidth: 520,
+            contentPadding: 20,
+            chipPadding: 10,
+            spacing: 6,
+            chipCount: 3
+        )
+        let occupied = 3 * (textWidth + 20) + 2 * 6
+
+        XCTAssertEqual(textWidth, 136, accuracy: 0.01)
+        XCTAssertLessThanOrEqual(occupied, 480,
+                                 "citation chips must fit inside the padded answer width")
     }
 }

@@ -127,6 +127,14 @@ case "ask":
                 if MnemoCLI.verbose { print("\n[entities] \(ents.joined(separator: " · "))") }
             case .reasoning(let steps):
                 if MnemoCLI.verbose { print("[reasoning] \(steps.joined(separator: " → "))") }
+            case .stage(let name, let elapsedMs):
+                if MnemoCLI.verbose { print("[stage] \(name) \(elapsedMs)ms") }
+            case .metrics(let m):
+                if MnemoCLI.verbose {
+                    let ft = m.firstTokenMs.map { "\($0)ms" } ?? "-"
+                    let tot = m.totalMs.map { "\($0)ms" } ?? "-"
+                    print("[metrics] first_token=\(ft) total=\(tot) egress=\(m.egressBlockedCount)")
+                }
             case .citation(let idx, let supported):
                 if !supported { print("\n[citation] sentence \(idx): UNSUPPORTED") }
             case .suggestions(let chips):

@@ -20,11 +20,17 @@ public enum Sentences {
                 if ch == ".", j < chars.count {
                     var k = i - 1
                     while k >= 0, chars[k].isWhitespace { k -= 1 }
-                    var start = k
-                    while start >= 0, chars[start].isLetter { start -= 1 }
-                    let abbrev = String(chars[(start + 1)...k])
-                    let nextCh = chars[j]
-                    if abbrev.count <= 3, nextCh.isUppercase || nextCh.isNumber { continue }
+                    // Only form a closed range when there is actually a word
+                    // before the period. Citation punctuation (`[2].`) and
+                    // other symbols previously produced `(k + 1)...k` and
+                    // crashed the whole answer path.
+                    if k >= 0, chars[k].isLetter {
+                        var start = k
+                        while start >= 0, chars[start].isLetter { start -= 1 }
+                        let abbrev = String(chars[(start + 1)...k])
+                        let nextCh = chars[j]
+                        if abbrev.count <= 3, nextCh.isUppercase || nextCh.isNumber { continue }
+                    }
                 }
                 let boundary = j >= chars.count || chars[j].isUppercase || chars[j].isNumber
                     || chars[j] == "\"" || chars[j] == "["

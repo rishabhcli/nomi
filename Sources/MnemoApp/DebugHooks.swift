@@ -85,7 +85,7 @@ final class DebugHooks {
         }
         controller.summon()
         controller.vm.state.query = q
-        Task { await controller.vm.submit() }
+        controller.vm.beginSubmit()
         try? "ask-started query=\(q)\n".appendToFile(atPath: "/tmp/mnemo-geometry.log")
     }
 

@@ -27,6 +27,7 @@ public enum ConfigSchema {
         "router": ["escalation_threshold"],
         "media": ["retry_count"],
         "inspector": ["suppression_ttl_days"],
+        "devtools": ["enabled", "port"],
     ]
 
     public static let allowedLoggingLevels: Set<String> = ["off", "none", "error", "warn", "info", "debug"]

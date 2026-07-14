@@ -113,6 +113,40 @@ final class FileURLTests: XCTestCase {
     }
 }
 
+final class FileUploadTests: XCTestCase {
+    func testMultipartIncludesExternalSourceMetadata() async throws {
+        let file = FileManager.default.temporaryDirectory
+            .appending(path: "upload-\(UUID().uuidString).md")
+        try "ORION-7429".write(to: file, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: file) }
+
+        StubURLProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/v3/documents/file")
+            let body = (String(data: request.httpBodyData ?? Data(), encoding: .utf8) ?? "")
+                .replacingOccurrences(of: #"\/"#, with: "/")
+            XCTAssertTrue(body.contains("ORION-7429"))
+            XCTAssertTrue(body.contains("mnemo_original_path"))
+            XCTAssertTrue(body.contains("/Volumes/Extreme SSD/ORION.md"))
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!,
+                Data(#"{"id":"external-doc"}"#.utf8)
+            )
+        }
+
+        let id = try await engine().uploadFile(
+            file,
+            container: "mnemo",
+            metadata: [ExternalCorpusMetadata.originalPath: "/Volumes/Extreme SSD/ORION.md"]
+        )
+        XCTAssertEqual(id, "external-doc")
+    }
+}
+
 // #4 containers derived from documents
 final class ContainerDeriveTests: XCTestCase {
     func testDistinctContainersFromDocuments() {
