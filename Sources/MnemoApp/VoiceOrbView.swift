@@ -13,7 +13,7 @@ struct VoiceOrbView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private static let diameter = Surface.orbDiameter
-    private let start = Date()
+    @State private var epoch = OrbAnimationEpoch()
     // Per-frame smoothing state in a reference holder so the TimelineView
     // view-builder can integrate dt each frame without mutating SwiftUI @State
     // value storage during the update pass.
@@ -21,7 +21,7 @@ struct VoiceOrbView: View {
 
     var body: some View {
         TimelineView(.animation) { timeline in
-            let t = timeline.date.timeIntervalSince(start)
+            let t = epoch.elapsed(at: timeline.date)
             // Ease the coarse (~12–45 Hz) mic envelope onto a display-rate value
             // so the wave/brightness/scale never staircase (UI.md §12.2).
             let amp = clock.tick(now: timeline.date, target: amplitude)

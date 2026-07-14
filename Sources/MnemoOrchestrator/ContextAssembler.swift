@@ -94,9 +94,10 @@ public struct ContextAssembler: Sendable {
         // Highest similarity first; keep while it fits. Profile memories are
         // query-relevant retrieval hits and must merge into the evidence pool.
         let ranked = (evidence + profile.memories).sorted { $0.similarity > $1.similarity }
+        let bounded = EvidenceSelector.select(ranked, for: intent)
         var kept: [Retrieved] = []
         var used = 0
-        for hit in ranked {
+        for hit in bounded {
             let cost = TokenEstimate.of(hit.memory)
             if used + cost > remaining { continue }   // skip; a smaller later hit may still fit
             kept.append(hit)

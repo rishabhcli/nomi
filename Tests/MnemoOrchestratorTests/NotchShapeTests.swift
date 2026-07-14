@@ -127,6 +127,30 @@ final class HoverGeometryTests: XCTestCase {
             phase: .input, hasDraft: false, isListening: true, isQuerying: false))
     }
 
+    func testResigningKeyDoesNotCollapseAStreamingAnswer() {
+        XCTAssertFalse(NotchHover.shouldCollapseOnResignKey(
+            phase: .answering,
+            isListening: false,
+            isQuerying: true
+        ), "clicking another app after the first token must not cancel the live query")
+
+        XCTAssertFalse(NotchHover.shouldCollapseOnResignKey(
+            phase: .searching,
+            isListening: false,
+            isQuerying: true
+        ))
+        XCTAssertFalse(NotchHover.shouldCollapseOnResignKey(
+            phase: .answering,
+            isListening: true,
+            isQuerying: false
+        ))
+        XCTAssertTrue(NotchHover.shouldCollapseOnResignKey(
+            phase: .answering,
+            isListening: false,
+            isQuerying: false
+        ), "a completed answer still follows the explicit click-away collapse policy")
+    }
+
     func testVoiceTargetMatchesOnlyTheNotchCollar() {
         let target = NotchInteraction.voiceTargetRect(
             surfaceWidth: 520,

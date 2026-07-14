@@ -2,6 +2,7 @@
 // Agent-B audit B-035
 import AppKit
 import MnemoCore
+import MnemoOrchestrator
 
 func mnemoConfigText() -> String? {
     var candidates = [
@@ -64,6 +65,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             other.terminate()
         }
         controller = NotchController(config: config)
+        Task { @MainActor [weak self] in
+            await self?.controller?.offerInitialOnboarding()
+        }
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: app,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.controller?.vm.refreshPermissionOnboarding()
+            }
+        }
         // No menu-bar item: the notch itself is the only affordance (UI.md §4).
 
         // Notch-hover summon + mouse-leave collapse (UI.md §5A/F).
@@ -84,9 +97,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 object: controller.panel, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated {
                     guard let self, let c = self.controller,
-                          c.vm.state.phase != .idle,
-                          c.vm.state.phase != .searching,
-                          !c.dictation.isListening else { return }
+                          NotchHover.shouldCollapseOnResignKey(
+                            phase: c.vm.state.phase,
+                            isListening: c.dictation.isListening,
+                            isQuerying: c.vm.isQuerying
+                          ) else { return }
                     c.dismiss()
                 }
             }

@@ -47,9 +47,57 @@ private struct MemoryPlusChunkRetriever: Retrieving, DocumentSearching {
 private enum ProbeError: Error { case boom }
 
 private struct ThrowingDocRetriever: Retrieving, DocumentSearching {
-    func search(_ req: SearchRequest) async throws -> [Retrieved] { [] }
+    func search(_ req: SearchRequest) async throws -> [Retrieved] {
+        [egHit("memory", "memory fallback remains usable", 0.75)]
+    }
     func searchDocuments(_ q: String, container: String?, limit: Int) async throws -> [Retrieved] {
         throw ProbeError.boom
+    }
+}
+
+private actor DocumentProbeRecorder {
+    private(set) var count = 0
+    func record() { count += 1 }
+}
+
+private struct HybridDocumentRetriever: Retrieving, DocumentSearching {
+    let recorder: DocumentProbeRecorder
+    func search(_ req: SearchRequest) async throws -> [Retrieved] {
+        [egHit("hybrid", "hybrid already returned the document passage", 0.88)]
+    }
+    func searchDocuments(_ q: String, container: String?, limit: Int) async throws -> [Retrieved] {
+        await recorder.record()
+        return []
+    }
+}
+
+private actor FallbackProbeRecorder {
+    private(set) var modes: [String] = []
+    private(set) var documentProbes = 0
+    func recordMode(_ mode: String) { modes.append(mode) }
+    func recordDocumentProbe() { documentProbes += 1 }
+}
+
+private struct MemoryFallbackHybridRetriever: Retrieving, DocumentSearching {
+    let recorder: FallbackProbeRecorder
+    func search(_ req: SearchRequest) async throws -> [Retrieved] {
+        await recorder.recordMode(req.searchMode)
+        return req.searchMode == "hybrid"
+            ? [egHit("hybrid", "hybrid fallback returned the passage", 0.88)]
+            : []
+    }
+    func searchDocuments(_ q: String, container: String?, limit: Int) async throws -> [Retrieved] {
+        await recorder.recordDocumentProbe()
+        return []
+    }
+}
+
+private struct CancellingDocumentRetriever: Retrieving, DocumentSearching {
+    func search(_ req: SearchRequest) async throws -> [Retrieved] {
+        [egHit("seed", "seed memory", 0.8)]
+    }
+    func searchDocuments(_ q: String, container: String?, limit: Int) async throws -> [Retrieved] {
+        throw CancellationError()
     }
 }
 
@@ -96,6 +144,58 @@ final class G0001EvidenceGatheringTests: XCTestCase {
             "chunk-level evidence must not be deduped away by a memory on the same docId")
     }
 
+    func testHybridSearchDoesNotRepeatTheDocumentEndpoint() async throws {
+        let recorder = DocumentProbeRecorder()
+        let svc = QueryService(
+            retriever: HybridDocumentRetriever(recorder: recorder),
+            generator: FakeGenerator(tokens: ["ok"]),
+            spans: SpanResolver(docs: FakeDocsStore(records: [:])),
+            defaults: SearchDefaults(searchMode: "hybrid", rerank: true,
+                                     threshold: 0.35, limit: 12, container: "c"),
+            mountRoot: "", documentSearchEnabled: true)
+
+        _ = try await svc.gatherEvidence("find the passage", intent: .lookup)
+
+        let probeCount = await recorder.count
+        XCTAssertEqual(probeCount, 0)
+    }
+
+    func testMemoriesToHybridFallbackDoesNotRepeatTheDocumentEndpoint() async throws {
+        let recorder = FallbackProbeRecorder()
+        let svc = QueryService(
+            retriever: MemoryFallbackHybridRetriever(recorder: recorder),
+            generator: FakeGenerator(tokens: ["ok"]),
+            spans: SpanResolver(docs: FakeDocsStore(records: [:])),
+            defaults: SearchDefaults(searchMode: "memories", rerank: true,
+                                     threshold: 0.35, limit: 12, container: "c"),
+            mountRoot: "", documentSearchEnabled: true)
+
+        _ = try await svc.gatherEvidence("find the passage", intent: .lookup)
+
+        let modes = await recorder.modes
+        let probeCount = await recorder.documentProbes
+        XCTAssertEqual(Array(modes.prefix(2)), ["memories", "hybrid"])
+        XCTAssertEqual(probeCount, 0,
+                       "hybrid fallback already searched document chunks")
+    }
+
+    func testDocumentSearchCancellationPropagates() async throws {
+        let svc = QueryService(
+            retriever: CancellingDocumentRetriever(),
+            generator: FakeGenerator(tokens: ["ok"]),
+            spans: SpanResolver(docs: FakeDocsStore(records: [:])),
+            defaults: SearchDefaults(searchMode: "memories", rerank: true,
+                                     threshold: 0.35, limit: 12, container: "c"),
+            mountRoot: "", documentSearchEnabled: true)
+
+        do {
+            _ = try await svc.gatherEvidence("find the seed", intent: .lookup)
+            XCTFail("document-search cancellation must not be downgraded to an unavailable probe")
+        } catch is CancellationError {
+            // Expected.
+        }
+    }
+
     func testShortQueryEchoIsExcludedFromChatRecall() async throws {
         let q = "why slip?"
         let svc = QueryService(
@@ -114,7 +214,7 @@ final class G0001EvidenceGatheringTests: XCTestCase {
             "transcript echo of the current short query must not become evidence")
     }
 
-    func testDocumentSearchFailurePropagatesWhenMemoriesEmpty() async throws {
+    func testDocumentSearchFailureLeavesRoomForLocalFallback() async throws {
         let svc = QueryService(
             retriever: ThrowingDocRetriever(),
             generator: FakeGenerator(tokens: ["ok"]),
@@ -122,10 +222,9 @@ final class G0001EvidenceGatheringTests: XCTestCase {
             defaults: SearchDefaults(searchMode: "memories", rerank: true,
                                      threshold: 0.35, limit: 12, container: "c"),
             mountRoot: "", documentSearchEnabled: true)
-        do {
-            _ = try await svc.gatherEvidence("only in chunks", intent: .lookup)
-            XCTFail("document search errors must propagate when memory search is empty")
-        } catch is ProbeError { }
+        let gathered = try await svc.gatherEvidence("only in chunks", intent: .lookup)
+        XCTAssertEqual(gathered.hits.map(\.source.docId), ["memory"])
+        XCTAssertTrue(gathered.steps.contains("Document search unavailable for this sub-question"))
     }
 
     func testAgenticFailurePropagatesOnMultihop() async throws {

@@ -20,7 +20,7 @@ final class AdaptiveEffortTests: XCTestCase {
         XCTAssertEqual(AdaptiveEffort.select(policy, intent: .lookup, coverageWeak: false, decomposed: true), "high")
     }
     func testTrivialLookupStaysAtBase() {
-        XCTAssertEqual(AdaptiveEffort.select(policy, intent: .lookup, coverageWeak: false, decomposed: false), "medium")
+        XCTAssertEqual(AdaptiveEffort.select(policy, intent: .lookup, coverageWeak: false, decomposed: false), "low")
     }
 }
 

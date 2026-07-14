@@ -1,10 +1,10 @@
 import Foundation
 
 // AnswerCache.swift — short-lived repeat-answer cache (helpfulness #7, M4).
-// Invariant: constructs no network URLs; keyed by query/container/corpusVersion.
+// Invariant: constructs no network URLs; keyed by query/container/corpusRevision.
 
 /// Short-lived answer cache for instant repeat questions (helpfulness #7).
-/// Keyed by (query, container, corpusVersion); a changed corpus or an elapsed
+/// Keyed by (query, container, corpusRevision); a changed corpus or an elapsed
 /// TTL invalidates entries, so cached facts never go stale.
 public actor AnswerCache {
     // A-189: ingestion
@@ -66,7 +66,7 @@ public actor AnswerCache {
         public static func unsupportedAnswerEvents() -> [QueryEvent] { [.state(.unsupportedAnswer)] }
 
     public struct Entry: Sendable { public let answer: String; public let sources: [SourceCard] }
-    private struct Stored { let answer: String; let sources: [SourceCard]; let version: Int; let at: TimeInterval }
+    private struct Stored { let answer: String; let sources: [SourceCard]; let revision: UInt64; let at: TimeInterval }
 
     private var entries: [String: Stored] = [:]
     private let ttl: TimeInterval
@@ -77,15 +77,15 @@ public actor AnswerCache {
         "\(container)::\(query.lowercased().trimmingCharacters(in: .whitespacesAndNewlines))"
     }
 
-    public func store(query: String, container: String, corpusVersion: Int,
+    public func store(query: String, container: String, corpusRevision: UInt64,
                       answer: String, sources: [SourceCard], at: TimeInterval = Date().timeIntervalSinceReferenceDate) {
-        entries[key(query, container)] = Stored(answer: answer, sources: sources, version: corpusVersion, at: at)
+        entries[key(query, container)] = Stored(answer: answer, sources: sources, revision: corpusRevision, at: at)
     }
 
-    public func lookup(query: String, container: String, corpusVersion: Int,
+    public func lookup(query: String, container: String, corpusRevision: UInt64,
                        at: TimeInterval = Date().timeIntervalSinceReferenceDate) -> Entry? {
         guard let s = entries[key(query, container)] else { return nil }
-        guard s.version == corpusVersion, at - s.at <= ttl else {
+        guard s.revision == corpusRevision, at - s.at <= ttl else {
             entries[key(query, container)] = nil   // stale → evict
             return nil
         }

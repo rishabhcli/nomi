@@ -116,6 +116,8 @@ public actor IngestIndex {
     let container: String?
     private var states: [String: ItemState] = [:]
     private var paths: [String: String] = [:]
+    private var documentSnapshot: [String: DocumentMeta] = [:]
+    private var revision: UInt64 = 0
     private var continuations: [UUID: AsyncStream<IngestEvent>.Continuation] = [:]
 
     public init(docs: DocumentIndexing, container: String?) {
@@ -144,15 +146,38 @@ public actor IngestIndex {
     /// on-device-extraction companion presents as ready.
     public func refresh() async {
         guard let rows = try? await docs.documentsList(container: container) else { return }
+        var nextSnapshot: [String: DocumentMeta] = [:]
+        var nextStates: [String: ItemState] = [:]
+        var nextPaths: [String: String] = [:]
         for row in rows {
+            nextSnapshot[row.id] = row
             let new = MediaCompanion.effectiveState(of: row, in: rows)
             let old = states[row.id]
-            if let p = row.filepath { paths[row.id] = p }
+            nextStates[row.id] = new
+            if let p = row.filepath { nextPaths[row.id] = p }
             guard old != new else { continue }
-            states[row.id] = new
             let event = IngestEvent(docId: row.id, path: row.filepath, from: old, to: new)
             for c in continuations.values { c.yield(event) }
         }
+        if nextSnapshot != documentSnapshot {
+            advanceCorpusRevision()
+            documentSnapshot = nextSnapshot
+        }
+        states = nextStates
+        paths = nextPaths
+    }
+
+    /// Invalidates answer caches immediately after an out-of-band local corpus
+    /// mutation, before the engine's next document-list poll observes it.
+    public func recordExternalMutation() {
+        advanceCorpusRevision()
+    }
+
+    /// Monotonic version of all queryable corpus state, not just cardinality.
+    public var corpusRevision: UInt64 { revision }
+
+    private func advanceCorpusRevision() {
+        revision += 1
     }
 
     public func state(of docId: String) -> ItemState? { states[docId] }

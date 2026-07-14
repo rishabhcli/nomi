@@ -45,7 +45,7 @@ final class QueryLifecycleTests: XCTestCase {
         for try await e in svc.ask("what is my favorite build tool?") {
             if case .routed = e { routeEvent = e; break }
         }
-        XCTAssertEqual(routeEvent, .routed(intent: "lookup", effort: "medium"))
+        XCTAssertEqual(routeEvent, .routed(intent: "lookup", effort: "low"))
     }
 
     func testProfilePreambleInjectedEveryQuery() async throws {

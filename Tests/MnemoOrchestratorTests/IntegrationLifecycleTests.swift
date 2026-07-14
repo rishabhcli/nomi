@@ -238,6 +238,47 @@ final class WarmColdBenchIntegrationTests: XCTestCase {
         let count = await counter.count
         XCTAssertEqual(count, 1, "warm cache hit must skip the second generator invocation")
     }
+
+    func testH0011_sameDocumentEditInvalidatesCacheWhileUnchangedRefreshDoesNot() async throws {
+        func row(updatedAt: String, fingerprint: String) -> DocumentMeta {
+            DocumentMeta(
+                id: "stable-document-id",
+                filepath: "/aurora.md",
+                title: "aurora.md",
+                status: "done",
+                containerTags: ["c"],
+                summary: nil,
+                updatedAt: updatedAt,
+                metadata: ["fingerprint": fingerprint]
+            )
+        }
+
+        let source = FakeDocumentSource([row(updatedAt: "2026-07-14T10:00:00Z", fingerprint: "v1")])
+        let index = IngestIndex(docs: source, container: "c")
+        await index.refresh()
+        let counter = GenerationCounter()
+        let svc = QueryService(
+            retriever: FakeRetriever(hitsByMode: ["memories": [BeatsSiriFixtures.timelineA]]),
+            generator: CountingGenerator(counter: counter),
+            spans: SpanResolver(docs: FakeDocsStore(records: [:])),
+            defaults: SearchDefaults(searchMode: "memories", rerank: true, threshold: 0.35, limit: 12, container: "c"),
+            mountRoot: "",
+            ingestIndex: index,
+            cache: AnswerCache()
+        )
+
+        for try await _ in svc.ask("What is Aurora?") {}
+        await index.refresh()
+        for try await _ in svc.ask("What is Aurora?") {}
+        var generationCount = await counter.count
+        XCTAssertEqual(generationCount, 1, "an unchanged refresh must retain the cached answer")
+
+        await source.set([row(updatedAt: "2026-07-14T10:01:00Z", fingerprint: "v2")])
+        await index.refresh()
+        for try await _ in svc.ask("What is Aurora?") {}
+        generationCount = await counter.count
+        XCTAssertEqual(generationCount, 2, "same-ID content metadata changes must invalidate the cached answer")
+    }
 }
 
 // MARK: - H-0012 / scenario 11: 105 use-case green run

@@ -70,10 +70,21 @@ public enum LocalExtractor {
 
     /// Extracts plain text from a media file, or nil when the type is not ours.
     public static func extract(_ url: URL) async throws -> String? {
+        try await extract(url, scheduler: nil)
+    }
+
+    /// Cooperative variant used by automatic volume indexing. Extraction
+    /// remains entirely on-device and pauses between expensive file/page units
+    /// whenever an interactive query is in flight.
+    public static func extract(_ url: URL, scheduler: WorkScheduler?) async throws -> String? {
+        try await waitForInteractiveWork(scheduler)
         switch Kind(url: url) {
         case .image: return try ocrImage(url)
-        case .pdf: return try ocrPDF(url)
-        case .docx: return try convertWithTextutil(url)
+        case .pdf: return try await ocrPDF(url, scheduler: scheduler)
+        case .docx:
+            let text = try convertWithTextutil(url)
+            try await waitForInteractiveWork(scheduler)
+            return text
         case .audioVideo: return try await transcribe(url)
         case .unsupported: return nil
         }
@@ -98,10 +109,11 @@ public enum LocalExtractor {
 
     // MARK: - PDF (text layer first, OCR fallback per page)
 
-    static func ocrPDF(_ url: URL) throws -> String? {
+    static func ocrPDF(_ url: URL, scheduler: WorkScheduler? = nil) async throws -> String? {
         guard let doc = PDFDocument(url: url) else { return nil }
         var pages: [String] = []
         for i in 0..<doc.pageCount {
+            try await waitForInteractiveWork(scheduler)
             guard let page = doc.page(at: i) else { continue }
             if let text = page.string, text.trimmingCharacters(in: .whitespacesAndNewlines).count >= 10 {
                 pages.append(text)   // real text layer
@@ -120,6 +132,7 @@ public enum LocalExtractor {
             ctx.fill(CGRect(origin: .zero, size: size))
             ctx.scaleBy(x: scale, y: scale)
             page.draw(with: .mediaBox, to: ctx)
+            try await waitForInteractiveWork(scheduler)
             if let cg = ctx.makeImage(), let text = try ocr(cg) {
                 pages.append(text)
             }
@@ -166,6 +179,18 @@ public enum LocalExtractor {
                 }
             }
         }
+    }
+
+    private static func waitForInteractiveWork(_ scheduler: WorkScheduler?) async throws {
+        guard let scheduler else {
+            try Task.checkCancellation()
+            return
+        }
+        while await scheduler.shouldBackgroundYield {
+            try Task.checkCancellation()
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        try Task.checkCancellation()
     }
 }
 

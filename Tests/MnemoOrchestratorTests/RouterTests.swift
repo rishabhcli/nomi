@@ -26,7 +26,7 @@ final class RouterHeuristicTests: XCTestCase {
 
     func testEffortMappingPerIntent() {
         let effort = EffortPolicy(routing: "low", extraction: "low", synthesis: "medium", multihop: "high")
-        XCTAssertEqual(effort.forIntent(.lookup), "medium")
+        XCTAssertEqual(effort.forIntent(.lookup), "low")
         XCTAssertEqual(effort.forIntent(.synthesis), "medium")
         XCTAssertEqual(effort.forIntent(.multihop), "high")
         XCTAssertEqual(effort.forIntent(.profile), "medium")
@@ -162,7 +162,7 @@ final class A91RegressionTests: XCTestCase {
 final class AnswerCacheInvariantTests: XCTestCase {
     func testCacheMissOnUnknownQuery() async {
         let cache = AnswerCache(ttl: 60)
-        let hit = await cache.lookup(query: "never asked", container: "c", corpusVersion: 1)
+        let hit = await cache.lookup(query: "never asked", container: "c", corpusRevision: 1)
         XCTAssertNil(hit)
     }
 }

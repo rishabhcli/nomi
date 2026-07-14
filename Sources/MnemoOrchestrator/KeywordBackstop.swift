@@ -17,6 +17,63 @@ import Foundation
 /// that no evidence covers and merges the matching paragraphs as evidence.
 /// Purely local file IO; no model, no network.
 public enum KeywordBackstop {
+    public static let maximumScannedFiles = 10_000
+
+    /// Query-time recursive traversal is only appropriate for predictable local
+    /// filesystems. The production SMFS surface is loopback NFS and must stay on
+    /// its indexed search path; a blocking mount syscall cannot be bounded by a
+    /// cooperative Swift task timeout.
+    public static func supportsDirectTraversal(fileSystemType rawValue: String?) -> Bool {
+        guard let value = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        else { return false }
+        return value == "apfs" || value == "hfs"
+    }
+
+    /// Hard limits for the synchronous filesystem fallback. The semantic path
+    /// remains primary; literal rescue may inspect only a small, predictable
+    /// slice of the mount before returning control to the interactive query.
+    public struct IOLimits: Equatable, Sendable {
+        public var maximumFiles: Int
+        public var maximumBytes: Int
+        public var maximumBytesPerFile: Int
+        public var maximumDurationSeconds: Double
+
+        public init(
+            maximumFiles: Int = KeywordBackstop.maximumScannedFiles,
+            maximumBytes: Int = 16 * 1_024 * 1_024,
+            maximumBytesPerFile: Int = 2 * 1_024 * 1_024,
+            maximumDurationSeconds: Double = 0.75
+        ) {
+            self.maximumFiles = max(0, maximumFiles)
+            self.maximumBytes = max(0, maximumBytes)
+            self.maximumBytesPerFile = max(0, maximumBytesPerFile)
+            self.maximumDurationSeconds = max(0, maximumDurationSeconds)
+        }
+    }
+
+    private struct ScanBudget {
+        let limits: IOLimits
+        let startedAt = ProcessInfo.processInfo.systemUptime
+        var visitedFiles = 0
+        var readBytes = 0
+
+        var expired: Bool {
+            limits.maximumDurationSeconds == 0
+                || ProcessInfo.processInfo.systemUptime - startedAt >= limits.maximumDurationSeconds
+        }
+
+        mutating func admitFile() -> Bool {
+            guard !expired, visitedFiles < limits.maximumFiles else { return false }
+            visitedFiles += 1
+            return true
+        }
+
+        var remainingBytes: Int { max(0, limits.maximumBytes - readBytes) }
+
+        mutating func consume(_ count: Int) {
+            readBytes = min(limits.maximumBytes, readBytes + max(0, count))
+        }
+    }
     // A-179: ingestion
     public static func indexingTerminalState(path: String) -> TerminalState { .indexing(path: path) }
     public static func ingestionSelfHealSafe(orphanIds: [String]) -> [String] { orphanIds.filter { !$0.isEmpty } }
@@ -124,34 +181,79 @@ public enum KeywordBackstop {
     /// synthetic hit per top file containing every matching paragraph (budget-
     /// capped). Letting the model read all matching paragraphs beats trying to
     /// guess the single "answer paragraph" by keyword density.
-    static func best(terms: [String], root: String, wantDigits: Bool, maxMatches: Int) -> [Retrieved] {
+    static func best(
+        terms: [String],
+        root: String,
+        wantDigits: Bool,
+        maxMatches: Int,
+        candidateURLs: [URL]? = nil
+    ) -> [Retrieved] {
+        var budget = ScanBudget(limits: IOLimits())
+        return (try? bestCancellable(
+            terms: terms,
+            root: root,
+            wantDigits: wantDigits,
+            maxMatches: maxMatches,
+            candidateURLs: candidateURLs,
+            budget: &budget
+        )) ?? []
+    }
+
+    private static func bestCancellable(
+        terms: [String],
+        root: String,
+        wantDigits: Bool,
+        maxMatches: Int,
+        candidateURLs: [URL]?,
+        budget: inout ScanBudget
+    ) throws -> [Retrieved] {
         let fm = FileManager.default
         guard !terms.isEmpty else { return [] }
         let stems = Array(Set(terms.map(stem)))
         let textExts: Set<String> = ["md", "txt", "csv", "json", "toml", "yaml", "yml", "rtf", "html"]
 
+        let urls: [URL]
+        if let candidateURLs {
+            urls = candidateURLs
+        } else {
+            urls = try recursiveFiles(root: root, budget: &budget)
+        }
+
         var files: [(name: String, path: String, content: String, lower: String)] = []
-        for url in recursiveFiles(root: root) {
+        for url in urls {
+            try Task.checkCancellation()
+            guard !budget.expired else { break }
             let name = relativePath(url.path, root: root)
             guard !name.hasSuffix(".smfs-error.txt") else { continue }
             let nameLower = name.lowercased()
             let nameMatches = stems.contains { nameLower.contains($0) }
             let ext = url.pathExtension.lowercased()
             let attrs = try? fm.attributesOfItem(atPath: url.path)
-            let isSmall = (attrs?[.size] as? Int ?? Int.max) < 2_000_000
-            let content = textExts.contains(ext) && isSmall
-                ? ((try? String(contentsOf: url, encoding: .utf8)) ?? "")
-                : ""
-            guard nameMatches || stems.contains(where: { content.lowercased().contains($0) }) else {
+            let fileSize = attrs?[.size] as? Int ?? 0
+            let allowance = min(fileSize, budget.remainingBytes, budget.limits.maximumBytesPerFile)
+            var content = ""
+            if textExts.contains(ext), allowance > 0,
+               let handle = try? FileHandle(forReadingFrom: url) {
+                let data = (try? handle.read(upToCount: allowance)) ?? nil
+                try? handle.close()
+                if let data {
+                    budget.consume(data.count)
+                    content = String(decoding: data, as: UTF8.self)
+                }
+            }
+            let lower = content.lowercased()
+            guard nameMatches || stems.contains(where: { lower.contains($0) }) else {
                 continue
             }
-            files.append((name, url.path, content, content.lowercased()))
+            files.append((name, url.path, content, lower))
         }
 
         // Rarity: a stem found in few files is a strong signal ("prune"),
         // one found everywhere is weak ("resume" across job notes).
         var docFreq: [String: Int] = [:]
-        for file in files {
+        for (index, file) in files.enumerated() {
+            if index.isMultiple(of: 64) { try Task.checkCancellation() }
+            guard !budget.expired else { break }
             let searchable = file.lower + "\n" + file.name.lowercased()
             for s in stems where searchable.contains(s) { docFreq[s, default: 0] += 1 }
         }
@@ -167,6 +269,8 @@ public enum KeywordBackstop {
         struct Line { let score: Double; let text: String; let file: Int }
         var lines: [Line] = []
         for (i, file) in files.enumerated() {
+            try Task.checkCancellation()
+            guard !budget.expired else { break }
             // The filename itself matching several stems means the question is
             // *about this document* — its leading lines are the answer even
             // when they don't repeat the query's words (tables, lists).
@@ -174,15 +278,18 @@ public enum KeywordBackstop {
             let titleMatches = stems.filter { nameLower.contains($0) }.count
             let contentMatches = stems.contains { file.lower.contains($0) }
             guard contentMatches || titleMatches > 0 else { continue }
-            if file.content.isEmpty, titleMatches > 0 {
+            if titleMatches > 0 {
                 lines.append(Line(
                     score: 5.0 + Double(titleMatches),
                     text: "File: \((file.name as NSString).lastPathComponent)\nLocation: \(file.path)",
                     file: i
                 ))
-            } else if titleMatches >= 2 {
+            }
+            if !file.content.isEmpty, titleMatches >= 2 {
                 var kept = 0
-                for rawLine in file.content.components(separatedBy: "\n") {
+                for (lineIndex, rawLine) in file.content.components(separatedBy: "\n").enumerated() {
+                    if lineIndex.isMultiple(of: 64) { try Task.checkCancellation() }
+                    guard !budget.expired else { break }
                     let line = rawLine.trimmingCharacters(in: .whitespaces)
                     guard !line.isEmpty, line.count < 400 else { continue }
                     lines.append(Line(score: 4.0 + Double(titleMatches), text: line, file: i))
@@ -191,7 +298,9 @@ public enum KeywordBackstop {
                 }
             }
             var heading = ""
-            for rawLine in file.content.components(separatedBy: "\n") {
+            for (lineIndex, rawLine) in file.content.components(separatedBy: "\n").enumerated() {
+                if lineIndex.isMultiple(of: 64) { try Task.checkCancellation() }
+                guard !budget.expired else { break }
                 let line = rawLine.trimmingCharacters(in: .whitespaces)
                 guard !line.isEmpty, line.count < 400 else { continue }
                 if line.hasPrefix("#") { heading = line; continue }
@@ -220,16 +329,17 @@ public enum KeywordBackstop {
         // (≤ maxMatches files so citations stay legible).
         var byFile: [Int: [String]] = [:]
         var fileOrder: [Int] = []
-        var budget = 1100
+        var snippetBudget = 1100
+        try Task.checkCancellation()
         for line in lines.sorted(by: { $0.score > $1.score }) {
-            guard budget - line.text.count > 0 else { continue }
+            guard snippetBudget - line.text.count > 0 else { continue }
             if byFile[line.file] == nil {
                 guard fileOrder.count < maxMatches else { continue }
                 fileOrder.append(line.file)
                 byFile[line.file] = []
             }
             byFile[line.file]!.append(line.text)
-            budget -= line.text.count
+            snippetBudget -= line.text.count
         }
         return fileOrder.map { idx in
             let name = files[idx].name
@@ -243,7 +353,7 @@ public enum KeywordBackstop {
         }
     }
 
-    private static func recursiveFiles(root: String) -> [URL] {
+    private static func recursiveFiles(root: String, budget: inout ScanBudget) throws -> [URL] {
         let rootURL = URL(fileURLWithPath: root, isDirectory: true)
         let keys: [URLResourceKey] = [.isRegularFileKey, .isSymbolicLinkKey]
         guard let enumerator = FileManager.default.enumerator(
@@ -253,12 +363,16 @@ public enum KeywordBackstop {
         ) else { return [] }
         var urls: [URL] = []
         while let url = enumerator.nextObject() as? URL {
+            try Task.checkCancellation()
+            guard !budget.expired else { break }
             guard let values = try? url.resourceValues(forKeys: Set(keys)),
                   values.isRegularFile == true,
                   values.isSymbolicLink != true
             else { continue }
+            guard budget.admitFile() else { break }
             urls.append(url)
         }
+        try Task.checkCancellation()
         return urls.sorted { $0.path < $1.path }
     }
 
@@ -275,21 +389,76 @@ public enum KeywordBackstop {
     /// extended) evidence and a reasoning note when anything was rescued.
     public static func rescue(query: String, evidence: [Retrieved],
                               mountRoot: String) -> ([Retrieved], String?) {
+        (try? rescueCancellable(query: query, evidence: evidence, mountRoot: mountRoot))
+            ?? (evidence, nil)
+    }
+
+    /// Throwing variant used by the query service so cancellation terminates
+    /// the filesystem scan instead of being mistaken for an empty result.
+    public static func rescueCancellable(
+        query: String,
+        evidence: [Retrieved],
+        mountRoot: String,
+        limits: IOLimits = IOLimits()
+    ) throws -> ([Retrieved], String?) {
+        try Task.checkCancellation()
         let terms = salientTerms(query)
         let numeric = NumericReasoner.isNumericQuestion(query)
             || query.lowercased().contains("when ")
         let missing = uncovered(terms: terms, in: evidence)
+        let lowerQuery = query.lowercased()
+        let mentionedExtension = lowerQuery
+            .components(separatedBy: .whitespacesAndNewlines)
+            .contains { token in
+                let ext = (token.trimmingCharacters(in: .punctuationCharacters) as NSString)
+                    .pathExtension.lowercased()
+                return !ext.isEmpty && ext.count <= 8
+            }
+        let explicitFileLookup = mentionedExtension
+            || ["filename", "file name", "file path", "folder", " pdf", "document"]
+                .contains { lowerQuery.contains($0) }
+        guard !missing.isEmpty || numeric || explicitFileLookup else {
+            return (evidence, nil)
+        }
         // A filename matching ≥2 query stems means the user is asking about
         // that document — always pull its actual lines (memories are distilled
         // summaries and often drop the concrete values being asked for).
         let stems = terms.map(stem)
-        let titleMatch = recursiveFiles(root: mountRoot).contains { url in
+        var budget = ScanBudget(limits: limits)
+        let candidates = try recursiveFiles(root: mountRoot, budget: &budget)
+        try Task.checkCancellation()
+        let titleMatch = explicitFileLookup && candidates.contains { url in
             stems.filter { url.lastPathComponent.lowercased().contains($0) }.count >= 2
         }
         guard !missing.isEmpty || numeric || titleMatch else { return (evidence, nil) }
 
         let searchTerms = (numeric || titleMatch) ? terms : missing
-        let hits = best(terms: searchTerms, root: mountRoot, wantDigits: numeric, maxMatches: 3)
+        var hits = try bestCancellable(
+            terms: searchTerms,
+            root: mountRoot,
+            wantDigits: numeric,
+            maxMatches: 3,
+            candidateURLs: candidates,
+            budget: &budget
+        )
+        try Task.checkCancellation()
+
+        // With no semantic evidence, a lone generic word is not enough to
+        // promote a random local file into generation context. Require two
+        // distinct query concepts in the same result, an exact structured
+        // identifier, or strong filename coverage.
+        if evidence.isEmpty {
+            let identifiers = exactIdentifiers(in: query)
+            hits = hits.filter {
+                isMeaningfulEmptyResult(
+                    $0,
+                    query: query,
+                    stems: Set(searchTerms.map(stem)),
+                    exactIdentifiers: identifiers,
+                    explicitFileLookup: explicitFileLookup
+                )
+            }
+        }
         var merged = evidence
         let existing = Set(evidence.map { $0.memory.prefix(120) })
         var added = false
@@ -300,5 +469,45 @@ public enum KeywordBackstop {
         guard added else { return (evidence, nil) }
         let label = searchTerms.prefix(4).joined(separator: "”, “")
         return (merged, "Grepped your files for “\(label)”")
+    }
+
+    private static func exactIdentifiers(in query: String) -> [String] {
+        query
+            .split(whereSeparator: { $0.isWhitespace })
+            .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: ".,?!()[]{}\"'")) }
+            .filter { token in
+                guard token.count >= 4 else { return false }
+                let hasLetter = token.contains(where: \.isLetter)
+                let hasNumber = token.contains(where: \.isNumber)
+                return (hasLetter && hasNumber)
+                    || token.contains("@")
+                    || token.filter({ $0 == "-" || $0 == "_" }).count >= 2
+            }
+            .map { $0.lowercased() }
+    }
+
+    private static func isMeaningfulEmptyResult(
+        _ hit: Retrieved,
+        query: String,
+        stems: Set<String>,
+        exactIdentifiers: [String],
+        explicitFileLookup: Bool
+    ) -> Bool {
+        let filename = URL(fileURLWithPath: hit.source.path).lastPathComponent.lowercased()
+        let searchable = "\(hit.memory) \(hit.source.title) \(filename)".lowercased()
+        if exactIdentifiers.contains(where: { searchable.contains($0) }) { return true }
+        if explicitFileLookup, !filename.isEmpty, query.lowercased().contains(filename) { return true }
+
+        let distinctCoverage = stems.filter { searchable.contains($0) }.count
+        if distinctCoverage >= 2 { return true }
+
+        let queryWords = Set(query.lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { $0.count >= 3 })
+        let filenameWords = Set(filename
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { $0.count >= 3 })
+        let filenameCoverage = queryWords.intersection(filenameWords).count
+        return explicitFileLookup && filenameCoverage >= 2
     }
 }

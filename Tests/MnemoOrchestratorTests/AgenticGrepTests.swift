@@ -138,6 +138,33 @@ final class SMFSGrepParseTests: XCTestCase {
         XCTAssertEqual(hits[0].lineStart, 2)
         XCTAssertTrue(hits[1].snippet.contains("remote caching"))
     }
+
+    func testLiteralHopFiltersIndexedResultsWithoutMountTraversal() {
+        let indexed = [
+            GrepHit(
+                path: "/notes/ZXQ-48291.md",
+                lineStart: 2,
+                lineEnd: 2,
+                snippet: "Release owner is Maya."
+            ),
+            GrepHit(
+                path: "/notes/related.md",
+                lineStart: 8,
+                lineEnd: 8,
+                snippet: "ZXQ-48291 is ready for review."
+            ),
+            GrepHit(
+                path: "/notes/noise.md",
+                lineStart: 1,
+                lineEnd: 1,
+                snippet: "A semantically related release checklist."
+            ),
+        ]
+
+        let matches = SMFSGrep.literalMatches(indexed, term: "zxq-48291")
+
+        XCTAssertEqual(matches.map(\.path), ["/notes/ZXQ-48291.md", "/notes/related.md"])
+    }
 }
 
 final class A211RegressionTests: XCTestCase {

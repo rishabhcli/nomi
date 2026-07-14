@@ -181,7 +181,8 @@ public enum SurfaceUX {
         }
 
         public static func truncatedSteps(_ steps: [String]) -> [String] {
-            Array(steps.prefix(maxVisibleSteps))
+            guard steps.count > maxVisibleSteps else { return steps }
+            return Array(steps.prefix(maxVisibleSteps - 1)) + [steps[steps.count - 1]]
         }
     }
 

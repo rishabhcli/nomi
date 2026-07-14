@@ -81,3 +81,14 @@ final class AmplitudeSmootherTests: XCTestCase {
         XCTAssertLessThanOrEqual(s.current, 1.0, "one-pole easing cannot overshoot")
     }
 }
+
+final class OrbAnimationEpochTests: XCTestCase {
+    func testElapsedTimeUsesOneStableEpoch() {
+        let start = Date(timeIntervalSinceReferenceDate: 100)
+        let epoch = OrbAnimationEpoch(start: start)
+
+        XCTAssertEqual(epoch.elapsed(at: start.addingTimeInterval(0.25)), 0.25, accuracy: 0.0001)
+        XCTAssertEqual(epoch.elapsed(at: start.addingTimeInterval(1.5)), 1.5, accuracy: 0.0001)
+        XCTAssertEqual(epoch.elapsed(at: start.addingTimeInterval(-1)), 0)
+    }
+}

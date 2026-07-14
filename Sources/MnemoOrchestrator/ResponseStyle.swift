@@ -96,7 +96,8 @@ public enum ResponseStyle {
     public static func directive(shape: AnswerShape, tone: ResponseTone) -> String {
         let shapeText: String
         switch shape {
-        case .definition: shapeText = "Answer with a single, crisp sentence — a definition, no preamble."
+        case .definition:
+            shapeText = "Answer with one crisp sentence containing one factual claim and one source title. Give only the core definition; do not append implementation details, examples, or a second clause."
         case .comparison: shapeText = "Format the answer as a compact Markdown table comparing the items, one row per dimension."
         case .timeline: shapeText = "Present the answer in chronological order as a dated bullet list (earliest first)."
         case .list: shapeText = "Answer as a short Markdown bullet list, one item per line."

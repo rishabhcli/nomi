@@ -73,12 +73,12 @@ final class Dictation: ObservableObject {
         // system suppresses the mic/Speech TCC prompt and the request hangs
         // forever. Activate briefly so the permission dialog can appear.
         NSApplication.shared.activate(ignoringOtherApps: true)
-        guard await Self.speechAuthorized() else {
-            abort("Speech recognition is off. Enable it in System Settings → Privacy & Security."); return
+        guard Self.speechIsAuthorized else {
+            abort("Speech recognition is off. Enable it in Privacy & Security settings."); return
         }
         guard s == session else { return }
-        guard await AVCaptureDevice.requestAccess(for: .audio) else {
-            abort("Microphone access is off. Enable it in System Settings → Privacy & Security → Microphone."); return
+        guard AVCaptureDevice.authorizationStatus(for: .audio) == .authorized else {
+            abort("Microphone access is off. Enable it in Privacy & Security settings."); return
         }
         guard s == session else { return }
         guard await Self.localeSupported(locale) else {
@@ -135,8 +135,8 @@ final class Dictation: ObservableObject {
         // @MainActor state. It converts to the analyzer's format and feeds the
         // (Sendable) stream continuation; the nonisolated amplitude helper
         // drives the orb.
-        nonisolated(unsafe) let cvt = converter
-        nonisolated(unsafe) let outFormat = format
+        let cvt = converter
+        let outFormat = format
         // Small tap buffer (~21 ms at 48 kHz) so the amplitude follower updates
         // ~45×/s, not ~12×/s — finer grain for the render-side smoother to ease.
         input.installTap(onBus: 0, bufferSize: 1024, format: tapFormat) { @Sendable [weak self] buffer, _ in
@@ -189,15 +189,8 @@ final class Dictation: ObservableObject {
 
     // MARK: - Nonisolated helpers (safe from any thread)
 
-    private nonisolated static func speechAuthorized() async -> Bool {
-        switch SFSpeechRecognizer.authorizationStatus() {
-        case .authorized: return true
-        case .notDetermined:
-            return await withCheckedContinuation { cont in
-                SFSpeechRecognizer.requestAuthorization { cont.resume(returning: $0 == .authorized) }
-            }
-        default: return false
-        }
+    private nonisolated static var speechIsAuthorized: Bool {
+        SFSpeechRecognizer.authorizationStatus() == .authorized
     }
 
     private nonisolated static func localeSupported(_ locale: Locale) async -> Bool {

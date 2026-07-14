@@ -50,14 +50,29 @@ final class AppCommandHandler: CommandHandling {
     }
 
     /// Working recovery for the dead-end states (M12 state machine).
-    func recover(_ recovery: TerminalState.Recovery) async -> String? {
+    func recover(_ recovery: TerminalState.Recovery) async -> RecoveryOutcome? {
         switch recovery {
         case .restartEngine:
-            do { try await supervisor.restart(.engine); return "Engine restarted." }
-            catch { return "Couldn't restart the engine automatically. Run `mnemo engine start`." }
+            do {
+                try await supervisor.startAll()
+                return RecoveryOutcome(message: "The local stack is ready.", stackReady: true)
+            } catch {
+                return RecoveryOutcome(
+                    message: "Couldn't restart the local stack automatically. Run `mnemo stack start`.",
+                    stackReady: false
+                )
+            }
         case .loadModel:
-            do { let m = try await launcher.ensureModelResident(); return "Model \(m) is loaded." }
-            catch { return "Couldn't load the model. Run `ollama pull \(config.model.synthesis)`." }
+            do {
+                let model = try await launcher.ensureModelResident()
+                // Model residency does not prove the engine or SMFS are ready.
+                return RecoveryOutcome(message: "Model \(model) is loaded.", stackReady: false)
+            } catch {
+                return RecoveryOutcome(
+                    message: "Couldn't load the model. Run `ollama pull \(config.model.synthesis)`.",
+                    stackReady: false
+                )
+            }
         default:
             return nil
         }

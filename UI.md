@@ -58,7 +58,7 @@ Pure path: `NotchShapeGeometry.path(in:topCornerRadius:bottomCornerRadius:)` —
 | Answering | 12 / 46 | Body grows downward; answer scrolls |
 | Voice drop | 0 / semicircle | Narrow (`Surface.dropWidth` = 176pt); orb inside |
 
-The bottom **Liquid Glass** rises through the bottom `Surface.glassFraction` (≈ 1/3) of the surface and the opaque-black body **fades out** across it — one seamless melt from pure black at the top to translucent glass at the bottom (the desktop shows through). The glass is drawn behind the body so it samples the desktop; one `GlassEffectContainer` groups all glass (F5).
+The bottom **Liquid Glass** rises through exactly `Surface.glassFraction` (0.36) of the surface and the opaque-black body **fades out** across it — one seamless melt from pure black at the top to translucent glass at the bottom (the desktop shows through). The glass is drawn behind the body so it samples the desktop; one `GlassEffectContainer` groups all glass (F5). Window focus never participates in the body material: the upper region stays `#000` after click-away.
 
 **AT-M12.1b:** concave shoulders with a full-bleed flush top edge; bottom radius grows with body height — `testTopCornersAreConcaveShoulders`, `testTopEdgeIsFullBleed`, `testBottomCornersAreRounded`, `testRadiusClampsOnTinyRects`.
 
@@ -104,15 +104,17 @@ From `Surface` enum (`Sources/MnemoApp/Motion.swift`):
 
 ### 5B. Collapse
 
-- **Trigger:** ESC, click-away (`NotchHover.isOutside`), or hotkey toggle.
+- **Trigger:** ESC, click-away (`NotchHover.isOutside`), hotkey toggle, or hold the bottom handle and swipe upward.
 - **Animation:** `Motion.collapse` — `spring(response: 0.30, dampingFraction: 0.90)` — zero bounce, retract into notch.
+- **Direct manipulation:** upward distance and velocity are evaluated by `SurfaceDismissGesture`; downward movement rubber-bands instead of detaching the collar from the notch.
 - **State reset:** query field may retain text; transient answer state clears on next `.routed`.
 
 ### 5C. Phase morph (input → searching → answering)
 
 - **Animation:** `Motion.grow` — `spring(response: 0.32, dampingFraction: 0.88)`.
 - **Width locked** at 520pt — vertical grow only.
-- **Searching:** spinner only in tray; no cycling status text in the notch collar (reasoning events exist for `mnemoctl` but are not rendered in the collar).
+- **Searching:** the compact spinner stays in the tray while a 170pt body above it renders the real cumulative reasoning/status stream (routing, searching, reading, synthesizing, verifying). No fabricated timer-driven steps.
+- **Background indexing:** the tray fade zone shows the active external-volume state (`detected`, `scanning`, `indexing`, `ready`, or `error`) without displacing the input controls.
 
 ### 5D. Status cross-fade
 
@@ -152,7 +154,7 @@ Centralized in `Motion` enum. **Do not scatter magic numbers in views.**
 | Token | SwiftUI `Animation` | Use |
 |-------|---------------------|-----|
 | `summon` | `spring(0.36, 0.84)` | idle → expanded |
-| `grow` | `spring(0.32, 0.88)` | phase morphs, streaming body growth |
+| `grow` | `spring(0.32, 0.88)` | phase morphs only; streamed answer height is quantized and does not retarget the spring per token |
 | `collapse` | `spring(0.30, 0.90)` | retract into notch |
 | `glyph` | `spring(0.25, 0.80)` | mic ↔ send |
 | `dissolve` | `easeInOut(0.20)` | status cross-fade |
@@ -175,7 +177,7 @@ static let glyph    = Animation.spring(response: 0.25, dampingFraction: 0.80)
 
 | Element | Spec |
 |---------|------|
-| Body | Pure `#000` — continues hardware notch |
+| Body | Pure `#000` — continues hardware notch and remains black when another app becomes key |
 | Answer text | 17pt, white, markdown-rendered |
 | Unsupported sentences (M5) | Orange + underline (`AT-M12.5`) |
 | Source cards | Title, path, relevance bar, relative time |
@@ -254,6 +256,11 @@ Reference: `Tests/Fixtures/reference/`, `scripts/ui-torture.sh`.
 | dB ceiling | 0dB → 1 | Full scale |
 
 Tested: `MicEnvelopeTests.testEnvelopeFollowerFastAttackSlowRelease`.
+
+The capture callback can update more slowly than the display. `AmplitudeSmoother`
+therefore integrates the latest envelope target on every `TimelineView` frame
+with a frame-rate-independent one-pole response. `OrbAnimationEpoch` is created
+once per orb lifetime; rebuilding a frame must never reset shader time to zero.
 
 ### 12.3 Metal shader orb
 

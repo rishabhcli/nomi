@@ -34,6 +34,15 @@ public enum OllamaLine {
 /// Local text generation via Ollama on loopback (M0 bootstrap, M4 synthesis).
 public protocol Generating: Sendable {
     func stream(system: String, prompt: String) -> AsyncThrowingStream<String, Error>
+    func stream(system: String, prompt: String, effort: String) -> AsyncThrowingStream<String, Error>
+}
+
+public extension Generating {
+    /// Existing generators remain source-compatible while callers can pass the
+    /// selected reasoning effort to runtimes that support it.
+    func stream(system: String, prompt: String, effort: String) -> AsyncThrowingStream<String, Error> {
+        stream(system: system, prompt: prompt)
+    }
 }
 
 /// HTTP client for Ollama streaming generation on 127.0.0.1 (M0, M4).
@@ -103,12 +112,18 @@ public struct OllamaClient: Generating {
         let model: String
         let system: String
         let prompt: String
+        let think: String
         let stream = true
         let keep_alive: String
     }
 
     public func stream(system: String, prompt: String) -> AsyncThrowingStream<String, Error> {
-        AsyncThrowingStream { continuation in
+        stream(system: system, prompt: prompt, effort: "low")
+    }
+
+    public func stream(system: String, prompt: String, effort: String) -> AsyncThrowingStream<String, Error> {
+        let think = Self.normalizedThinkingEffort(effort)
+        return AsyncThrowingStream { continuation in
             let task = Task {
                 do {
                     var url = baseURL
@@ -117,7 +132,13 @@ public struct OllamaClient: Generating {
                     r.httpMethod = "POST"
                     r.timeoutInterval = 600
                     r.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                    r.httpBody = try JSONEncoder().encode(Body(model: model, system: system, prompt: prompt, keep_alive: keepAlive))
+                    r.httpBody = try JSONEncoder().encode(Body(
+                        model: model,
+                        system: system,
+                        prompt: prompt,
+                        think: think,
+                        keep_alive: keepAlive
+                    ))
                     let (bytes, resp) = try await session.bytes(for: r)
                     // A failed generation must throw, never end as a silent
                     // zero-token stream (invariant: no silent failures).
@@ -133,5 +154,10 @@ public struct OllamaClient: Generating {
             }
             continuation.onTermination = { _ in task.cancel() }
         }
+    }
+
+    private static func normalizedThinkingEffort(_ effort: String) -> String {
+        let normalized = effort.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return ["low", "medium", "high"].contains(normalized) ? normalized : "low"
     }
 }

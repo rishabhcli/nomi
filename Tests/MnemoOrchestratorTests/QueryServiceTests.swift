@@ -25,6 +25,58 @@ struct FakeGenerator: Generating {
     }
 }
 
+private struct EffortEchoGenerator: Generating {
+    func stream(system: String, prompt: String) -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { continuation in
+            continuation.yield("legacy")
+            continuation.finish()
+        }
+    }
+
+    func stream(system: String, prompt: String, effort: String) -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { continuation in
+            continuation.yield(effort)
+            continuation.finish()
+        }
+    }
+}
+
+private actor GenerationCallRecorder {
+    private(set) var count = 0
+    func record() { count += 1 }
+}
+
+private struct CountingUngroundedGenerator: Generating {
+    let recorder: GenerationCallRecorder
+
+    func stream(system: String, prompt: String) -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { continuation in
+            Task {
+                await recorder.record()
+                continuation.yield("The moon is made of cheese.")
+                continuation.finish()
+            }
+        }
+    }
+}
+
+private struct AlwaysRejectingVerificationBackend: VerificationBackend {
+    func similarity(_ a: String, _ b: String) async -> Double { 1 }
+    func entails(premise: String, hypothesis: String) async -> Bool { false }
+}
+
+private actor ConversationWriteRecorder: ConversationIngesting {
+    private(set) var count = 0
+
+    func ingestConversation(
+        id: String,
+        messages: [(role: String, content: String)],
+        container: String?
+    ) async throws {
+        count += 1
+    }
+}
+
 private actor EscalationRecorder {
     var count = 0
     func record() { count += 1 }
@@ -36,6 +88,11 @@ private struct RecordingEscalator: RouterEscalating {
         await recorder.record()
         return .synthesis
     }
+}
+
+private struct FixedProfileProvider: ProfileFetching {
+    let value: Profile
+    func profile(_ q: String, container: String?) async throws -> Profile { value }
 }
 
 struct FakeDocsStore: DocumentFetching {
@@ -50,16 +107,87 @@ private func makeService(hitsByMode: [String: [Retrieved]],
                          tokens: [String] = ["ok"],
                          recorder: RequestRecorder? = nil,
                          docs: [String: DocumentRecord] = [:],
-                         mountRoot: String = "") -> QueryService {
+                         mountRoot: String = "",
+                         directTraversalPolicy: @escaping @Sendable (String) -> Bool = { _ in false }) -> QueryService {
     QueryService(retriever: FakeRetriever(hitsByMode: hitsByMode, recorder: recorder),
                  generator: FakeGenerator(tokens: tokens),
                  spans: SpanResolver(docs: FakeDocsStore(records: docs)),
                  defaults: SearchDefaults(searchMode: "memories", rerank: true,
                                           threshold: 0.35, limit: 12, container: "mnemo"),
-                 mountRoot: mountRoot)
+                 mountRoot: mountRoot,
+                 directTraversalPolicy: directTraversalPolicy)
 }
 
 final class QueryServiceTests: XCTestCase {
+    func testUnsupportedRetryIsNeitherCachedNorWrittenToConversationMemory() async throws {
+        let generation = GenerationCallRecorder()
+        let conversations = ConversationWriteRecorder()
+        let service = QueryService(
+            retriever: FakeRetriever(hitsByMode: ["memories": [hit]]),
+            generator: CountingUngroundedGenerator(recorder: generation),
+            spans: SpanResolver(docs: FakeDocsStore(records: [:])),
+            defaults: SearchDefaults(
+                searchMode: "memories",
+                rerank: true,
+                threshold: 0.35,
+                limit: 12,
+                container: "mnemo"
+            ),
+            mountRoot: "",
+            verifier: CitationVerifier(
+                backend: AlwaysRejectingVerificationBackend(),
+                simThreshold: 0.5
+            ),
+            cache: AnswerCache(ttl: 120),
+            selfCorrect: true,
+            conversationSink: conversations
+        )
+
+        for _ in 0..<2 {
+            var terminal: TerminalState?
+            for try await event in service.ask("Where is the launch plan?") {
+                if case let .state(value) = event { terminal = value }
+            }
+            XCTAssertEqual(terminal, .unsupportedAnswer)
+        }
+
+        let generationCount = await generation.count
+        let conversationCount = await conversations.count
+        XCTAssertEqual(generationCount, 4,
+                       "each ask must generate and retry instead of replaying a rejected cache entry")
+        XCTAssertEqual(conversationCount, 0,
+                       "rejected text must never become conversation memory")
+    }
+
+    func testFinalSynthesisPassesAdaptiveEffortToGenerator() async throws {
+        let service = QueryService(
+            retriever: FakeRetriever(hitsByMode: ["memories": [hit]]),
+            generator: EffortEchoGenerator(),
+            spans: SpanResolver(docs: FakeDocsStore(records: [:])),
+            defaults: SearchDefaults(
+                searchMode: "memories",
+                rerank: true,
+                threshold: 0.35,
+                limit: 12,
+                container: "mnemo"
+            ),
+            mountRoot: "",
+            effort: EffortPolicy(
+                routing: "low",
+                extraction: "low",
+                synthesis: "medium",
+                multihop: "high"
+            )
+        )
+
+        var answer = ""
+        for try await event in service.ask("Where do I live?") {
+            if case let .token(token) = event { answer += token }
+        }
+
+        XCTAssertEqual(answer, "medium")
+    }
+
     func testEmitsSourcesBeforeTokensThenDone() async throws {
         let svc = makeService(hitsByMode: ["memories": [hit]], tokens: ["A", "B"])
         var events: [QueryEvent] = []
@@ -136,6 +264,145 @@ final class QueryServiceTests: XCTestCase {
         for step in steps {
             XCTAssertFalse(step.contains(secret), "reasoning steps must not embed document text")
         }
+    }
+
+    func testEmitsLiveReasoningBeforeSourcesAndGeneration() async throws {
+        let svc = makeService(hitsByMode: ["memories": [hit]], tokens: ["answer"])
+        var events: [QueryEvent] = []
+
+        for try await event in svc.ask("where do I live?") {
+            events.append(event)
+        }
+
+        let sourceIndex = try XCTUnwrap(events.firstIndex {
+            if case .sources = $0 { return true }
+            return false
+        })
+        let liveReasoning = events[..<sourceIndex].compactMap { event -> [String]? in
+            if case let .reasoning(steps) = event { return steps }
+            return nil
+        }
+
+        XCTAssertFalse(liveReasoning.isEmpty, "search activity must be visible while retrieval is running")
+        XCTAssertTrue(liveReasoning.contains { $0.contains("Searching semantic memory") })
+        XCTAssertTrue(liveReasoning.contains { steps in
+            steps.contains { $0.hasPrefix("Found ") && $0.contains("memory match") }
+        })
+        XCTAssertFalse(events.contains { event in
+            guard case let .reasoning(steps) = event else { return false }
+            return steps.contains("Checking every claim against your files")
+        }, "verification activity must only be shown when a verifier is wired")
+    }
+
+    func testEmptySemanticSearchUsesLocalBackstopBeforeEmptyState() async throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appending(path: "query-backstop-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try "Project codename: Zephyr. Launch owner: Maya."
+            .write(to: root.appending(path: "launch-notes.md"), atomically: true, encoding: .utf8)
+
+        let svc = makeService(
+            hitsByMode: [:],
+            tokens: ["Zephyr is the project codename."],
+            mountRoot: root.path,
+            directTraversalPolicy: { _ in true }
+        )
+        var cards: [SourceCard] = []
+        var answer = ""
+        var terminal: TerminalState?
+        for try await event in svc.ask("What is the project codename Zephyr?") {
+            if case let .sources(found) = event { cards = found }
+            if case let .token(token) = event { answer += token }
+            if case let .state(state) = event { terminal = state }
+        }
+
+        XCTAssertFalse(cards.isEmpty, "local files must rescue an empty embedding result")
+        XCTAssertTrue(answer.contains("Zephyr"))
+        XCTAssertNil(terminal)
+    }
+
+    func testNetworkMountSkipsDirectFilesystemBackstopAfterSemanticRetrieval() async throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appending(path: "query-network-backstop-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try "Zephyr launch owner: Maya."
+            .write(to: root.appending(path: "private-owner.md"), atomically: true, encoding: .utf8)
+
+        let semantic = Retrieved(
+            memory: "The Zephyr launch checklist is indexed.",
+            similarity: 0.82,
+            source: .init(docId: "semantic", path: "/zephyr.md", title: "Zephyr")
+        )
+        let svc = makeService(
+            hitsByMode: ["memories": [semantic]],
+            mountRoot: root.path
+        )
+        var cards: [SourceCard] = []
+        for try await event in svc.ask("Who owns the Zephyr launch?") {
+            if case let .sources(found) = event { cards = found }
+        }
+
+        XCTAssertTrue(cards.contains { $0.title == "Zephyr" })
+        XCTAssertFalse(
+            cards.contains { $0.title == "private-owner" },
+            "network mounts must stay on the indexed retrieval path"
+        )
+    }
+
+    func testLookupCapsNoisyEvidenceAndKeepsDistinctSources() {
+        let hits = (0..<12).flatMap { index -> [Retrieved] in
+            let source = SourceLocator(
+                docId: "d\(index)", path: "/d\(index).md", title: "Document \(index)"
+            )
+            return [
+                Retrieved(memory: "primary fact \(index)", similarity: 0.9 - Double(index) * 0.01,
+                          source: source),
+                Retrieved(memory: "duplicate chunk \(index)", similarity: 0.7 - Double(index) * 0.01,
+                          source: source),
+            ]
+        }
+
+        let selected = EvidenceSelector.select(hits, for: .lookup)
+
+        XCTAssertEqual(selected.count, 6)
+        XCTAssertEqual(Set(selected.map(\.source.docId)).count, 6,
+                       "lookup context should prefer distinct sources before extra chunks")
+        XCTAssertTrue(selected.allSatisfy { !$0.source.docId.isEmpty })
+    }
+
+    func testSourceCardsMatchFinalAssembledGenerationEvidence() async throws {
+        let oversized = Retrieved(
+            memory: String(repeating: "retrieval-only ", count: 80),
+            similarity: 0.8,
+            source: .init(docId: "retrieved", path: "/retrieved.md", title: "Retrieved")
+        )
+        let profileHit = Retrieved(
+            memory: "Atlas owner is Maya.",
+            similarity: 0.95,
+            source: .init(docId: "profile", path: "/profile.md", title: "Profile")
+        )
+        let service = QueryService(
+            retriever: FakeRetriever(hitsByMode: ["memories": [oversized]]),
+            generator: FakeGenerator(tokens: ["ok"]),
+            spans: SpanResolver(docs: FakeDocsStore(records: [:])),
+            defaults: SearchDefaults(searchMode: "memories", rerank: true,
+                                     threshold: 0.35, limit: 12, container: "mnemo"),
+            mountRoot: "",
+            profiles: FixedProfileProvider(value: Profile(
+                statics: [], dynamics: [], memories: [profileHit]
+            )),
+            assembler: ContextAssembler(tokenBudget: 80, preambleFraction: 0.35)
+        )
+
+        var cards: [SourceCard] = []
+        for try await event in service.ask("Who owns Atlas?") {
+            if case let .sources(found) = event { cards = found }
+        }
+
+        XCTAssertEqual(cards.map(\.docId), ["profile"],
+                       "cards must describe only evidence that reached generation")
     }
 
     func testChitChatSkipsRetrievalAndGeneration() async throws {

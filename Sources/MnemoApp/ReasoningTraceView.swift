@@ -100,6 +100,12 @@ struct ReasoningTraceView: View {
             .transition(Motion.adaptiveTransition(reduceMotion: reduceMotion))
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Reasoning trace")
+            .onChange(of: hasAnswer) { _, answerArrived in
+                guard answerArrived else { return }
+                withAnimation(Motion.adaptive(Motion.dissolve, reduceMotion: reduceMotion)) {
+                    expanded = false
+                }
+            }
         }
     }
 

@@ -1,5 +1,20 @@
 import Foundation
 
+/// Stable time origin for the continuously animated orb shader. A SwiftUI view
+/// may be recreated whenever mic amplitude changes; keeping this value in
+/// `@State` prevents those updates from resetting the shader's phase.
+public struct OrbAnimationEpoch: Equatable, Sendable {
+    private let startReferenceTime: TimeInterval
+
+    public init(start: Date = Date()) {
+        startReferenceTime = start.timeIntervalSinceReferenceDate
+    }
+
+    public func elapsed(at date: Date) -> TimeInterval {
+        max(0, date.timeIntervalSinceReferenceDate - startReferenceTime)
+    }
+}
+
 /// Mic-amplitude envelope for the listening orb (UI.md §12.2): RMS → dB →
 /// normalized 0…1, then a fast-attack / slow-release follower so the wave is
 /// responsive but never strobes. Pure math — the audio tap feeds it.

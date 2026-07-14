@@ -16,59 +16,87 @@ extension QueryService {
         let hits: [Retrieved]; let broadened: Bool; let decomposed: Bool; let steps: [String]
     }
 
-    func gatherEvidence(_ q: String, intent: Intent) async throws -> Gathered {
+    func gatherEvidence(
+        _ q: String,
+        intent: Intent,
+        progress: (@Sendable ([String]) -> Void)? = nil
+    ) async throws -> Gathered {
+        try Task.checkCancellation()
         var steps: [String] = []
+        func report(_ step: String) {
+            steps.append(step)
+            progress?(steps)
+        }
+
+        report("Searching semantic memory")
         // Compound-question decomposition (#10): retrieve for each sub-question.
         let subs = QueryDecomposer.split(q)
         let decomposed = subs.count > 1
-        if decomposed { steps.append("Split into \(subs.count) sub-questions") }
+        if decomposed { report("Split into \(subs.count) sub-questions") }
         var merged: [Retrieved] = []
         var seen = Set<String>()
         for sub in subs {
+            try Task.checkCancellation()
+            var searchedMode = defaults.searchMode
             var hits = try await search(sub, mode: defaults.searchMode)
             if hits.isEmpty, defaults.searchMode == "memories" {
+                report("Expanding the search across documents and memory")
+                searchedMode = "hybrid"
                 hits = try await search(sub, mode: "hybrid")
             }
             for h in hits where seen.insert(dedupeKey(h)).inserted { merged.append(h) }
+            report("Found \(merged.count) memory match\(merged.count == 1 ? "" : "es")")
 
             // Engine document (chunk-level) search as a standing second
             // surface (#9): memories are distilled and can lag or miss a
             // document entirely — the top chunks carry the source text.
-            if documentSearchEnabled, let docSearcher = retriever as? DocumentSearching {
+            // Hybrid search already includes document chunks. Probe the legacy
+            // document endpoint when this sub-question stayed memory-only, or
+            // when hybrid itself was empty and the legacy passage surface is
+            // the remaining rescue. A successful memories → hybrid fallback
+            // must not repeat the same document surface.
+            if documentSearchEnabled,
+               (searchedMode != "hybrid" || hits.isEmpty),
+               let docSearcher = retriever as? DocumentSearching {
                 let chunkLimit = hits.isEmpty ? defaults.limit : 3
                 do {
+                    report("Reading indexed document passages")
                     let chunks = try await docSearcher.searchDocuments(sub, container: defaults.container, limit: chunkLimit)
+                    try Task.checkCancellation()
                     var added = 0
                     for h in chunks where seen.insert(dedupeKey(h)).inserted { merged.append(h); added += 1 }
-                    if added > 0, hits.isEmpty { steps.append("Used the engine's document search") }
+                    if added > 0 { report("Read \(added) relevant document passage\(added == 1 ? "" : "s")") }
+                } catch is CancellationError {
+                    throw CancellationError()
                 } catch {
-                    if hits.isEmpty { throw error }
-                    steps.append("Document search unavailable for this sub-question")
+                    report("Document search unavailable for this sub-question")
                 }
             }
         }
-        steps.append("Searched memory (\(merged.count) hits)")
+        report("Finished local retrieval with \(merged.count) candidate\(merged.count == 1 ? "" : "s")")
 
         // Auto-escalation (#1): weak coverage → broaden before answering.
         var broadened = false
         let topSim = merged.map(\.similarity).max() ?? 0
         if Coverage.isWeak(topSimilarity: topSim, count: merged.count) {
+            report("Checking broader matches for stronger coverage")
             let broader = try await retriever.search(Coverage.escalate(SearchRequest(
                 q: q, searchMode: defaults.searchMode, rerank: defaults.rerank,
                 threshold: defaults.threshold, limit: defaults.limit, container: defaults.container)))
             if (broader.map(\.similarity).max() ?? 0) > topSim || (merged.isEmpty && !broader.isEmpty) {
                 for h in broader where seen.insert(dedupeKey(h)).inserted { merged.append(h) }
                 broadened = true
-                steps.append("Broadened the search (weak coverage)")
+                report("Broadened the search because coverage was weak")
             }
         }
 
         // Agentic multi-hop (#1): follow the thread across files.
         if intent == .multihop, let agentic {
+            report("Following related facts across files")
             let result = try await agentic.run(q, scope: nil)
             var added = 0
             for h in result.evidence where seen.insert(dedupeKey(h)).inserted { merged.append(h); added += 1 }
-            if !result.hops.isEmpty { steps.append("Followed the thread across files (\(result.hops.count) hops, +\(added) evidence)") }
+            if !result.hops.isEmpty { report("Followed the thread across files (\(result.hops.count) hops, +\(added) evidence)") }
         }
 
         // Cross-session recall (beats-Siri #6): pull relevant prior conversation
@@ -96,12 +124,13 @@ extension QueryService {
                 merged.append(Retrieved(memory: h.memory, similarity: h.similarity * 0.7, source: src))
                 added += 1
             }
-            if added > 0 { steps.append("Recalled \(added) fact\(added == 1 ? "" : "s") from earlier conversations") }
+            if added > 0 { report("Recalled \(added) fact\(added == 1 ? "" : "s") from earlier conversations") }
         }
 
         // Time-aware queries (#5): prefer sources from the named period.
         if let window = TimeWindow.parse(query: q) {
             merged = TimeWindow.filter(merged, to: window)
+            report("Filtered sources to the requested time period")
         }
         return Gathered(hits: merged, broadened: broadened, decomposed: decomposed, steps: steps)
     }
@@ -125,8 +154,11 @@ extension QueryService {
     }
 
     func search(_ q: String, mode: String) async throws -> [Retrieved] {
-        try await retriever.search(SearchRequest(
+        try Task.checkCancellation()
+        let hits = try await retriever.search(SearchRequest(
             q: q, searchMode: mode, rerank: defaults.rerank,
             threshold: defaults.threshold, limit: defaults.limit, container: defaults.container))
+        try Task.checkCancellation()
+        return hits
     }
 }

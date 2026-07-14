@@ -158,8 +158,11 @@ final class SurfaceReasoningTraceTests: XCTestCase {
 
     func testE0008_truncatesLongTraces() {
         let steps = (1...20).map { "step \($0)" }
-        XCTAssertEqual(SurfaceUX.ReasoningTrace.truncatedSteps(steps).count,
-                       SurfaceUX.ReasoningTrace.maxVisibleSteps)
+        let visible = SurfaceUX.ReasoningTrace.truncatedSteps(steps)
+        XCTAssertEqual(visible.count, SurfaceUX.ReasoningTrace.maxVisibleSteps)
+        XCTAssertEqual(visible.first, "step 1")
+        XCTAssertEqual(visible.last, "step 20",
+                       "the live trace must retain the current action when capped")
     }
 }
 

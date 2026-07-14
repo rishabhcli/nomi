@@ -15,6 +15,62 @@ private func doc(_ id: String, path: String, status: String) -> DocumentMeta {
 }
 
 final class IngestIndexTests: XCTestCase {
+    func testCorpusRevisionAdvancesForSameIDSnapshotMutationsButNotUnchangedRefreshes() async {
+        func snapshot(
+            path: String = "/a.md",
+            status: String = "done",
+            updatedAt: String = "2026-07-14T10:00:00Z",
+            metadata: [String: String] = ["fingerprint": "one"]
+        ) -> DocumentMeta {
+            DocumentMeta(
+                id: "same-document",
+                filepath: path,
+                title: "a.md",
+                status: status,
+                containerTags: ["mnemo"],
+                summary: nil,
+                updatedAt: updatedAt,
+                metadata: metadata
+            )
+        }
+
+        let source = FakeDocumentSource([snapshot()])
+        let index = IngestIndex(docs: source, container: "mnemo")
+
+        await index.refresh()
+        var revision = await index.corpusRevision
+        XCTAssertEqual(revision, 1)
+
+        await index.refresh()
+        revision = await index.corpusRevision
+        XCTAssertEqual(revision, 1, "an unchanged snapshot must preserve cacheability")
+
+        await source.set([snapshot(updatedAt: "2026-07-14T10:01:00Z")])
+        await index.refresh()
+        revision = await index.corpusRevision
+        XCTAssertEqual(revision, 2)
+
+        await source.set([snapshot(status: "indexing", updatedAt: "2026-07-14T10:01:00Z")])
+        await index.refresh()
+        revision = await index.corpusRevision
+        XCTAssertEqual(revision, 3)
+
+        await source.set([snapshot(path: "/renamed.md", status: "indexing", updatedAt: "2026-07-14T10:01:00Z")])
+        await index.refresh()
+        revision = await index.corpusRevision
+        XCTAssertEqual(revision, 4)
+
+        await source.set([snapshot(
+            path: "/renamed.md",
+            status: "indexing",
+            updatedAt: "2026-07-14T10:01:00Z",
+            metadata: ["fingerprint": "two"]
+        )])
+        await index.refresh()
+        revision = await index.corpusRevision
+        XCTAssertEqual(revision, 5)
+    }
+
     func testEmitsTransitionsOnRefresh() async throws {
         let source = FakeDocumentSource([doc("d1", path: "/a.md", status: "queued")])
         let index = IngestIndex(docs: source, container: "mnemo")

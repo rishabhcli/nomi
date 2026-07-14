@@ -96,6 +96,15 @@ public enum NotchHover {
                                           isQuerying: Bool) -> Bool {
         phase == .input && !hasDraft && !isListening && !isQuerying
     }
+
+    /// Losing key status is an explicit click-away only after interactive work
+    /// has stopped. The first streamed token changes the phase to `.answering`,
+    /// so phase alone cannot distinguish a completed answer from a live one.
+    public static func shouldCollapseOnResignKey(phase: NotchPhase,
+                                                  isListening: Bool,
+                                                  isQuerying: Bool) -> Bool {
+        phase != .idle && phase != .searching && !isListening && !isQuerying
+    }
 }
 
 /// Pure hit geometry for the collar's voice control. The expanded body is

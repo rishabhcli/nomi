@@ -273,3 +273,4 @@ extension EngineClient: ChunkProviding, DocumentSearching, ConversationIngesting
 }
 
 extension EngineClient: CorpusFileUploading {}
+extension EngineClient: CorpusDocumentDeleting {}

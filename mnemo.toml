@@ -29,7 +29,7 @@ queue_max = 4096
 self_heal_enabled = true
 
 [retrieval]
-default_mode = "memories"               # memories | hybrid
+default_mode = "hybrid"                 # memories | hybrid
 rerank = true
 threshold = 0.35
 limit = 12

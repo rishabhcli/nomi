@@ -134,7 +134,8 @@ public struct EffortPolicy: Equatable, Sendable {
     public func forIntent(_ intent: Intent) -> String {
         switch intent {
         case .multihop: return multihop
-        case .lookup, .synthesis, .profile: return synthesis   // single-shot synthesis tier
+        case .lookup: return routing
+        case .synthesis, .profile: return synthesis
         }
     }
 }

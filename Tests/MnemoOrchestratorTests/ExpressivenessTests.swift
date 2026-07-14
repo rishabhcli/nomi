@@ -32,6 +32,14 @@ final class AnswerShapeTests: XCTestCase {
         XCTAssertTrue(ResponseStyle.directive(shape: .comparison, tone: .balanced).lowercased().contains("table"))
         XCTAssertTrue(ResponseStyle.directive(shape: .timeline, tone: .balanced).lowercased().contains("chronolog"))
     }
+
+    func testDefinitionDirectiveKeepsTheAnswerToOneGroundedClaim() {
+        let directive = ResponseStyle.directive(shape: .definition, tone: .balanced).lowercased()
+
+        XCTAssertTrue(directive.contains("one factual claim"))
+        XCTAssertTrue(directive.contains("implementation details"))
+        XCTAssertTrue(directive.contains("one source"))
+    }
 }
 
 // MARK: - #2 Response tone

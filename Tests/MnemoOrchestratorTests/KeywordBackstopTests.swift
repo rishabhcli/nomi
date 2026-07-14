@@ -44,6 +44,18 @@ final class KeywordBackstopTests: XCTestCase {
         XCTAssertFalse(terms.contains("the"))
     }
 
+    func testDirectTraversalPolicyRejectsNetworkFileSystems() {
+        for type in ["nfs", "NFS", "smbfs", "webdav", "afpfs"] {
+            XCTAssertFalse(
+                KeywordBackstop.supportsDirectTraversal(fileSystemType: type),
+                "interactive fallback must not recurse through \(type) mounts"
+            )
+        }
+        XCTAssertFalse(KeywordBackstop.supportsDirectTraversal(fileSystemType: nil))
+        XCTAssertTrue(KeywordBackstop.supportsDirectTraversal(fileSystemType: "apfs"))
+        XCTAssertTrue(KeywordBackstop.supportsDirectTraversal(fileSystemType: "hfs"))
+    }
+
     func testUncoveredFindsMissingTerms() {
         let ev = [Retrieved(memory: "Job search research is complete.", similarity: 0.7,
                             source: .init(docId: "a", path: "/a.md", title: "a"))]
@@ -100,6 +112,102 @@ final class KeywordBackstopTests: XCTestCase {
                       "digit-bearing prune paragraph should be rescued: \(merged.map(\.memory))")
     }
 
+    func testEmptyEvidenceRejectsSingleGenericTermMatch() throws {
+        try "Launch checklist for routine releases."
+            .write(to: dir.appending(path: "generic.md"), atomically: true, encoding: .utf8)
+
+        let (merged, note) = KeywordBackstop.rescue(
+            query: "What is the Zephyr launch owner?",
+            evidence: [],
+            mountRoot: dir.path
+        )
+
+        XCTAssertTrue(merged.isEmpty)
+        XCTAssertNil(note, "one generic word must not turn an empty semantic result into evidence")
+    }
+
+    func testEmptyEvidenceAcceptsExactIdentifier() throws {
+        try "Tracking identifier: ZXQ-48291"
+            .write(to: dir.appending(path: "tracker.md"), atomically: true, encoding: .utf8)
+
+        let (merged, note) = KeywordBackstop.rescue(
+            query: "Where is ZXQ-48291?",
+            evidence: [],
+            mountRoot: dir.path
+        )
+
+        XCTAssertNotNil(note)
+        XCTAssertTrue(merged.contains { $0.memory.contains("ZXQ-48291") })
+    }
+
+    func testEmptyEvidenceAcceptsExactFilename() throws {
+        try "Release owner: Maya."
+            .write(to: dir.appending(path: "README.md"), atomically: true, encoding: .utf8)
+
+        let (merged, note) = KeywordBackstop.rescue(
+            query: "Open README.md",
+            evidence: [],
+            mountRoot: dir.path
+        )
+
+        XCTAssertNotNil(note)
+        XCTAssertEqual(merged.first?.source.title, "README")
+    }
+
+    func testRescueHonorsByteBudget() throws {
+        try "Zephyr launch owner is Maya."
+            .write(to: dir.appending(path: "opaque.md"), atomically: true, encoding: .utf8)
+
+        let result = try KeywordBackstop.rescueCancellable(
+            query: "Who owns the Zephyr launch?",
+            evidence: [],
+            mountRoot: dir.path,
+            limits: .init(maximumFiles: 100, maximumBytes: 0,
+                          maximumBytesPerFile: 0, maximumDurationSeconds: 1)
+        )
+
+        XCTAssertTrue(result.0.isEmpty)
+        XCTAssertNil(result.1)
+    }
+
+    func testRescueHonorsTimeBudget() throws {
+        let result = try KeywordBackstop.rescueCancellable(
+            query: "What is the Chrome control status?",
+            evidence: [],
+            mountRoot: dir.path,
+            limits: .init(maximumFiles: 100, maximumBytes: 1_024,
+                          maximumBytesPerFile: 1_024, maximumDurationSeconds: 0)
+        )
+
+        XCTAssertTrue(result.0.isEmpty)
+        XCTAssertNil(result.1)
+    }
+
+    func testCancellationPropagatesFromFilesystemRescue() async {
+        let root = dir.path
+        let (gate, gateContinuation) = AsyncStream<Void>.makeStream()
+        let task = Task.detached { () throws -> ([Retrieved], String?) in
+            for await _ in gate { break }
+            return try KeywordBackstop.rescueCancellable(
+                query: "Who owns the Zephyr launch?",
+                evidence: [],
+                mountRoot: root
+            )
+        }
+        task.cancel()
+        gateContinuation.yield()
+        gateContinuation.finish()
+
+        do {
+            _ = try await task.value
+            XCTFail("cancelled filesystem rescue must throw CancellationError")
+        } catch is CancellationError {
+            // Expected.
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+    }
+
     func testHeadingBodyExtension() {
         // A match on a heading-only paragraph must carry its body along.
         let hits = KeywordBackstop.best(terms: ["eligible"], root: dir.path,
@@ -120,7 +228,11 @@ final class KeywordBackstopTests: XCTestCase {
             maxMatches: 3
         )
 
-        XCTAssertEqual(hits.first?.source.path, file.resolvingSymlinksInPath().path)
+        let foundPath = try XCTUnwrap(hits.first?.source.path)
+        XCTAssertTrue(
+            FileManager.default.contentsEqual(atPath: foundPath, andPath: file.path),
+            "the backstop should return the same file even when /var is surfaced as /private/var"
+        )
         XCTAssertTrue(hits.first?.memory.contains("Orion SSD Archive.pdf") == true)
     }
 }

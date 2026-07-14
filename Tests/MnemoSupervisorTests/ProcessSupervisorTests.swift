@@ -90,7 +90,7 @@ final class ProcessSupervisorTests: XCTestCase {
     }
 
     func testRestartHonorsBackoffConfig() async throws {
-        var text = supervisorSampleConfig + "\n[supervisor]\nrestart_backoff = 500\n"
+        let text = supervisorSampleConfig + "\n[supervisor]\nrestart_backoff = 500\n"
         let cfg = try MnemoConfig.load(from: text)
         XCTAssertEqual(cfg.supervisor.restartBackoffMs, 500)
     }

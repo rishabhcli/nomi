@@ -61,4 +61,48 @@ final class OllamaClientStreamTests: XCTestCase {
         }
         XCTAssertEqual(tokens, ["Hi"], "tokens before the error still stream")
     }
+
+    func testDefaultStreamRequestsLowThinkingEffort() async throws {
+        try await assertRequestedThink(call: { client in
+            client.stream(system: "s", prompt: "p")
+        }, equals: "low")
+    }
+
+    func testEffortAwareStreamNormalizesSupportedThinkingEffort() async throws {
+        try await assertRequestedThink(call: { client in
+            client.stream(system: "s", prompt: "p", effort: " HIGH ")
+        }, equals: "high")
+    }
+
+    func testEffortAwareStreamFallsBackToLowForUnknownThinkingEffort() async throws {
+        try await assertRequestedThink(call: { client in
+            client.stream(system: "s", prompt: "p", effort: "maximum")
+        }, equals: "low")
+    }
+
+    private func assertRequestedThink(
+        call: (OllamaClient) -> AsyncThrowingStream<String, Error>,
+        equals expected: String
+    ) async throws {
+        StubURLProtocol.handler = { request in
+            let body = try XCTUnwrap(request.bodyStreamData())
+            let json = try XCTUnwrap(
+                JSONSerialization.jsonObject(with: body) as? [String: Any]
+            )
+            XCTAssertEqual(json["think"] as? String, expected)
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!,
+                Data("{\"response\":\"ok\",\"done\":false}\n".utf8)
+            )
+        }
+
+        var tokens: [String] = []
+        for try await token in call(client()) { tokens.append(token) }
+        XCTAssertEqual(tokens, ["ok"])
+    }
 }

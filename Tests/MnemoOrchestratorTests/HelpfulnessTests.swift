@@ -114,27 +114,27 @@ final class AnswerCacheTests: XCTestCase {
     func testHitWithinTTLAndVersion() async {
         let cache = AnswerCache(ttl: 100)
         let cards = [SourceCard(title: "t", path: "/p", docId: "d")]
-        await cache.store(query: "q", container: "c", corpusVersion: 5,
+        await cache.store(query: "q", container: "c", corpusRevision: 5,
                           answer: "A", sources: cards, at: 0)
-        let hit = await cache.lookup(query: "q", container: "c", corpusVersion: 5, at: 50)
+        let hit = await cache.lookup(query: "q", container: "c", corpusRevision: 5, at: 50)
         XCTAssertEqual(hit?.answer, "A")
     }
     func testMissAfterCorpusChanges() async {
         let cache = AnswerCache(ttl: 100)
-        await cache.store(query: "q", container: "c", corpusVersion: 5, answer: "A", sources: [], at: 0)
-        let hit = await cache.lookup(query: "q", container: "c", corpusVersion: 6, at: 10)
+        await cache.store(query: "q", container: "c", corpusRevision: 5, answer: "A", sources: [], at: 0)
+        let hit = await cache.lookup(query: "q", container: "c", corpusRevision: 6, at: 10)
         XCTAssertNil(hit, "a changed corpus invalidates cached answers")
     }
     func testMissAfterTTL() async {
         let cache = AnswerCache(ttl: 100)
-        await cache.store(query: "q", container: "c", corpusVersion: 5, answer: "A", sources: [], at: 0)
-        let hit = await cache.lookup(query: "q", container: "c", corpusVersion: 5, at: 200)
+        await cache.store(query: "q", container: "c", corpusRevision: 5, answer: "A", sources: [], at: 0)
+        let hit = await cache.lookup(query: "q", container: "c", corpusRevision: 5, at: 200)
         XCTAssertNil(hit)
     }
     func testDifferentQueryMisses() async {
         let cache = AnswerCache(ttl: 100)
-        await cache.store(query: "q", container: "c", corpusVersion: 5, answer: "A", sources: [], at: 0)
-        let hit = await cache.lookup(query: "other", container: "c", corpusVersion: 5, at: 10)
+        await cache.store(query: "q", container: "c", corpusRevision: 5, answer: "A", sources: [], at: 0)
+        let hit = await cache.lookup(query: "other", container: "c", corpusRevision: 5, at: 10)
         XCTAssertNil(hit)
     }
 }

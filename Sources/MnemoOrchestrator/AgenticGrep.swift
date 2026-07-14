@@ -162,7 +162,8 @@ public struct AgenticGrep: Sendable {
     }
 }
 
-/// Real grep surface over the SMFS mount: semantic smfs grep + literal /usr/bin/grep (M3).
+/// Real grep surface over the SMFS index. Literal hops reuse indexed search and
+/// retain exact matches; they never recursively traverse the NFS mount.
 public struct SMFSGrep: GrepSurface {
     let smfsPath: String
     let containerTag: String
@@ -216,6 +217,14 @@ public struct SMFSGrep: GrepSurface {
         return hits
     }
 
+    public static func literalMatches(_ hits: [GrepHit], term: String) -> [GrepHit] {
+        let needle = term.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !needle.isEmpty else { return [] }
+        return hits.filter {
+            $0.path.lowercased().contains(needle) || $0.snippet.lowercased().contains(needle)
+        }
+    }
+
     /// Maps `(unknown)` memory-level hits to real mount paths via ingest metadata.
     public static func resolveUnknownHits(_ hits: [GrepHit], docs: [DocumentMeta]) -> [GrepHit] {
         let byTitle = docs.compactMap { d -> (String, String)? in
@@ -240,10 +249,7 @@ public struct SMFSGrep: GrepSurface {
     }
 
     public func literal(_ term: String, scope: String?) async throws -> [GrepHit] {
-        let root = scope ?? mountRoot
-        // grep exits 1 on zero matches — that is a valid empty result.
-        let out = (try? Subprocess.capture("/usr/bin/grep", ["-rFn", term, root])) ?? ""
-        return Self.parseLiteralOutput(out, mountRoot: mountRoot)
+        Self.literalMatches(try await semantic(term, scope: scope), term: term)
     }
 }
 

@@ -161,6 +161,7 @@ public struct QueryService: QueryServing {
     let spans: SpanResolver
     let defaults: SearchDefaults
     let mountRoot: String    // absolute memory-path; engine filepaths are relative to it
+    let directTraversalPolicy: @Sendable (String) -> Bool
     let ingestIndex: IngestIndex?
     let router: QueryRouter
     let profiles: ProfileFetching?
@@ -187,7 +188,9 @@ public struct QueryService: QueryServing {
     let trace: DevTrace?
 
     public init(retriever: Retrieving, generator: Generating, spans: SpanResolver,
-                defaults: SearchDefaults, mountRoot: String, ingestIndex: IngestIndex? = nil,
+                defaults: SearchDefaults, mountRoot: String,
+                directTraversalPolicy: @escaping @Sendable (String) -> Bool = { _ in false },
+                ingestIndex: IngestIndex? = nil,
                 router: QueryRouter = HeuristicRouter(),
                 profiles: ProfileFetching? = nil,
                 assembler: ContextAssembler = ContextAssembler(tokenBudget: 8000),
@@ -226,6 +229,7 @@ public struct QueryService: QueryServing {
         self.spans = spans
         self.defaults = defaults
         self.mountRoot = mountRoot
+        self.directTraversalPolicy = directTraversalPolicy
         self.ingestIndex = ingestIndex
         self.router = router
         self.profiles = profiles
@@ -243,7 +247,10 @@ public struct QueryService: QueryServing {
     /// metrics, emit them just before `.done`, then flush the log line.
     private func finishQuery(_ tracker: inout QueryLogTracker, egressBaseline: Int,
                              continuation: AsyncThrowingStream<QueryEvent, Error>.Continuation) async {
-        // Per-query egress = calls blocked DURING this query, never the process total.
+        // Per-query egress delta combines app calls blocked by URLProtocol with
+        // non-loopback socket lifetimes observed in the managed process tree.
+        // The legacy metrics field is named `egressBlockedCount`, but observed
+        // child sockets are violations, not claims about denied syscalls.
         let delta = max(0, egressCounter() - egressBaseline)
         let entry = tracker.finalize(egressBlockedCount: delta)
         continuation.yield(.metrics(QueryMetrics(
@@ -307,7 +314,10 @@ public struct QueryService: QueryServing {
                     // 1. Route; escalate genuinely ambiguous corpus queries to the model (#4).
                     let routing = router.classify(q0)
                     var intent = routing.intent
-                    if routing.ambiguous, let escalator { intent = await escalator.classify(q0) }
+                    if routing.ambiguous, let escalator {
+                        continuation.yield(.reasoning(["Classifying the request locally"]))
+                        intent = await escalator.classify(q0)
+                    }
                     let effortTier = effort.forIntent(intent)
                     tracker.noteRouted(intent: intent.rawValue, effort: effortTier)
                     continuation.yield(.routed(intent: intent.rawValue, effort: effortTier))
@@ -318,9 +328,9 @@ public struct QueryService: QueryServing {
                                                        "ambiguous": .bool(routing.ambiguous)]))
 
                     // Answer cache (#7): instant repeat, invalidated on corpus change.
-                    let corpusVersion = await (ingestIndex?.documentCount ?? 0)
+                    let corpusRevision = await (ingestIndex?.corpusRevision ?? 0)
                     if let cache, history.isEmpty,
-                       let cached = await cache.lookup(query: q0, container: defaults.container ?? "", corpusVersion: corpusVersion) {
+                       let cached = await cache.lookup(query: q0, container: defaults.container ?? "", corpusRevision: corpusRevision) {
                         await tracer?.event("cache", "info", message: "hit", data: .object(["hit": .bool(true)]))
                         continuation.yield(.sources(cached.sources))
                         continuation.yield(.token(cached.answer))
@@ -335,8 +345,11 @@ public struct QueryService: QueryServing {
                     let q: String
                     if q0.count < 48, intent == .lookup {
                         q = q0
+                    } else if let rewriter {
+                        continuation.yield(.reasoning(["Rewriting the question for local retrieval"]))
+                        q = await rewriter.rewrite(q0)
                     } else {
-                        q = await rewriter?.rewrite(q0) ?? q0
+                        q = q0
                     }
                     if q != q0 {
                         await tracer?.event("rewrite", "info", message: "rewritten",
@@ -352,7 +365,9 @@ public struct QueryService: QueryServing {
                     // 2. Gather evidence: decompose (#10) → search → escalate (#1) →
                     //    agentic multi-hop (#1) → time-filter (#5).
                     let tRetrieve = Date()
-                    let gathered = try await gatherEvidence(q, intent: intent)
+                    let gathered = try await gatherEvidence(q, intent: intent) { steps in
+                        continuation.yield(.reasoning(steps))
+                    }
                     continuation.yield(.stage(name: "retrieve", elapsedMs: Self.elapsedMs(since: tRetrieve)))
                     let hits = gathered.hits
                     let broadened = gathered.broadened
@@ -363,7 +378,37 @@ public struct QueryService: QueryServing {
                                      "aboveThreshold": .bool(h.similarity >= defaults.threshold),
                                      "snippet": .string(String((h.context ?? h.memory).prefix(200)))])
                         })]))
-                    if hits.isEmpty {
+
+                    // Literal-keyword rescue must also run when semantic search
+                    // returns nothing. Exact filenames, identifiers, and fresh
+                    // files can exist locally before their embeddings are ready.
+                    var gathered2 = hits
+                    var backstopSteps = gathered.steps
+                    if !mountRoot.isEmpty, directTraversalPolicy(mountRoot) {
+                        let rescueTask = Task.detached(priority: .utility) {
+                            try KeywordBackstop.rescueCancellable(
+                                query: q0,
+                                evidence: hits,
+                                mountRoot: mountRoot
+                            )
+                        }
+                        let (rescued, note) = try await withTaskCancellationHandler {
+                            try await rescueTask.value
+                        } onCancel: {
+                            rescueTask.cancel()
+                        }
+                        try Task.checkCancellation()
+                        if let note {
+                            gathered2 = rescued
+                            backstopSteps.append(note)
+                            continuation.yield(.reasoning(backstopSteps))
+                            await tracer?.event("backstop", "info", message: note,
+                                                data: .object(["triggered": .bool(true),
+                                                               "rescued": .int(rescued.count)]))
+                        }
+                    }
+
+                    if gathered2.isEmpty {
                         // Honesty about readiness (AT-M2.3): if anything is still
                         // being ingested, say "indexing", never a false refusal.
                         if let index = ingestIndex {
@@ -402,44 +447,43 @@ public struct QueryService: QueryServing {
                         await finishQuery(&tracker, egressBaseline: egressBaseline, continuation: continuation)
                         return
                     }
-                    // Literal-keyword backstop: if a salient query term never
-                    // appears in the evidence (semantic miss on exact tokens
-                    // like names/ids), grep the mount and merge the matching
-                    // fact lines — and pull the engine's chunk-level document
-                    // search too, since chunks often hold the exact token.
-                    var gathered2 = hits
-                    var backstopSteps = gathered.steps
-                    if !mountRoot.isEmpty {
-                        let (rescued, note) = KeywordBackstop.rescue(query: q0, evidence: hits, mountRoot: mountRoot)
-                        if let note {
-                            gathered2 = rescued
-                            backstopSteps.append(note)
-                            await tracer?.event("backstop", "info", message: note,
-                                                data: .object(["triggered": .bool(true),
-                                                               "rescued": .int(rescued.count)]))
-                            if documentSearchEnabled, let docSearcher = retriever as? DocumentSearching,
-                               let chunkHits = try? await docSearcher.searchDocuments(q0, container: defaults.container, limit: 3) {
-                                let existing = Set(gathered2.map { $0.memory.prefix(120) })
-                                for h in chunkHits where !existing.contains(h.memory.prefix(120)) {
-                                    gathered2.append(h)
-                                }
-                            }
-                        }
-                    }
                     // Personalized ranking (#7): blend similarity + usage + recency.
                     let resolved0 = await spans.resolve(gathered2)
                     let strengths = await strength?.counts() ?? [:]
-                    var resolved = PersonalRanker.rank(resolved0, strength: strengths)
+                    var resolved = EvidenceSelector.select(
+                        PersonalRanker.rank(resolved0, strength: strengths),
+                        for: intent
+                    )
                     // Timeline reconstruction (beats-Siri #3): order chronologically
                     // when the question is about a sequence/history.
                     let shape = AnswerShape.detect(query: q0, intent: intent)
                     if shape == .timeline { resolved = TimelineBuilder.build(from: resolved) }
-                    let cards = makeCards(resolved)
+
+                    // 3. Assemble the exact context generation will receive before
+                    // emitting source cards. Profile search memories can enter the
+                    // evidence pool and the token budget can remove retrieved hits;
+                    // the UI must never advertise sources absent from the prompt.
+                    let profile = (await profileTask) ?? Profile(statics: [], dynamics: [], memories: [])
+                    var assembled = assembler.assemble(intent: intent, question: q0,
+                                                       profile: profile, evidence: resolved)
+                    if shape == .timeline {
+                        assembled = AssembledContext(
+                            preamble: assembled.preamble,
+                            evidence: TimelineBuilder.build(from: assembled.evidence),
+                            tokenBudget: assembled.tokenBudget
+                        )
+                    }
+                    let generationEvidence = assembled.evidence
+                    let cards = makeCards(generationEvidence)
 
                     let phrase = broadened
                         ? "Broadened the search across \(cards.count) notes…"
                         : Understanding.phrase(intent: intent, sourceCount: cards.count)
                     continuation.yield(.understanding(phrase))
+                    backstopSteps.append(
+                        "Reading \(cards.count) source\(cards.count == 1 ? "" : "s") for the answer"
+                    )
+                    continuation.yield(.reasoning(backstopSteps))
                     continuation.yield(.sources(cards))              // sub-second, before tokens
 
                     // See-also (#8): related documents beyond the cited ones.
@@ -452,19 +496,15 @@ public struct QueryService: QueryServing {
 
                     // Strengthen retrieved memories (M8): retrieval reinforces.
                     if let strength {
-                        for docId in Set(resolved.map { $0.source.docId }) where !docId.isEmpty {
+                        for docId in Set(generationEvidence.map { $0.source.docId }) where !docId.isEmpty {
                             await strength.strengthen(docId)
                         }
                     }
 
                     // Contradiction awareness / reconciliation (beats-Siri #10).
-                    let conflicts = ConflictDetector.conflicts(in: resolved)
+                    let conflicts = ConflictDetector.conflicts(in: generationEvidence)
 
-                    // 3. Assemble context: profile preamble + budget-trimmed evidence,
-                    //    shaped to the question and tone; effort adapts to difficulty (#6).
-                    let profile = (await profileTask) ?? Profile(statics: [], dynamics: [], memories: [])
-                    let assembled = assembler.assemble(intent: intent, question: q0,
-                                                        profile: profile, evidence: resolved)
+                    // Shape the prompt and adapt effort to difficulty (#6).
                     let directive = ResponseStyle.directive(shape: shape, tone: tone)
                     let genEffort = AdaptiveEffort.select(effort, intent: intent,
                                                           coverageWeak: broadened, decomposed: gathered.decomposed)
@@ -475,7 +515,7 @@ public struct QueryService: QueryServing {
                     // computed figure so it doesn't guess arithmetic. Prior-chat
                     // recall is excluded — only the user's documents count.
                     var numericNote = ""
-                    let numericEvidence = resolved.filter { $0.source.title != Self.chatRecallTitle }
+                    let numericEvidence = generationEvidence.filter { $0.source.title != Self.chatRecallTitle }
                     if NumericReasoner.isNumericQuestion(q0), let n = NumericReasoner.durationNote(in: numericEvidence) {
                         numericNote = "\n\n\(n)"
                     }
@@ -483,7 +523,7 @@ public struct QueryService: QueryServing {
                     var steps = backstopSteps
                     if !conflicts.isEmpty { steps.append("Reconciled \(conflicts.count) conflicting fact set(s) by recency") }
                     if !numericNote.isEmpty { steps.append("Computed a figure from the dated facts") }
-                    steps.append("Answering at \(genEffort) effort")
+                    steps.append("Synthesizing a grounded answer at \(genEffort) effort")
                     continuation.yield(.reasoning(steps))
                     tracker.noteReasoningStep()
                     tracker.noteContextTokens(assembled.evidence.reduce(0) { $0 + $1.memory.count / 4 })
@@ -492,9 +532,13 @@ public struct QueryService: QueryServing {
 
                     // 4. Generate, with a self-correcting retry (#3) if the first
                     //    answer verifies as ungrounded.
-                    func generate(system: String) async throws -> String {
+                    func generate(system: String, generationEffort: String) async throws -> String {
                         var text = ""
-                        for try await tok in generator.stream(system: system, prompt: basePrompt) {
+                        for try await tok in generator.stream(
+                            system: system,
+                            prompt: basePrompt,
+                            effort: generationEffort
+                        ) {
                             text += tok
                             tracker.noteFirstToken()
                             await tracer?.event("generate", "token", data: .object(["tokenText": .string(tok)]))
@@ -509,8 +553,12 @@ public struct QueryService: QueryServing {
                                        "question": .string(q0),
                                        "contextTokens": .int(assembled.evidence.reduce(0) { $0 + $1.memory.count / 4 })]))
                     let tGenerate = Date()
-                    var answer = try await generate(system: system)
+                    var answer = try await generate(system: system, generationEffort: genEffort)
                     continuation.yield(.stage(name: "generate", elapsedMs: Self.elapsedMs(since: tGenerate)))
+                    if verifier != nil {
+                        steps.append("Checking every claim against your files")
+                        continuation.yield(.reasoning(steps))
+                    }
                     let tVerify = Date()
                     var verdicts = await verifier?.verify(answer: answer, evidence: assembled.evidence)
                     if verifier != nil {
@@ -522,13 +570,14 @@ public struct QueryService: QueryServing {
                         let strict = Prompt.compose(
                             preamble: assembled.preamble, effort: effort.multihop,
                             style: directive + " Answer ONLY from the provided context; if it isn't there, say you don't know.")
-                        answer = try await generate(system: strict)
+                        answer = try await generate(system: strict, generationEffort: effort.multihop)
                         verdicts = await verifier?.verify(answer: answer, evidence: assembled.evidence)
                     }
                     await tracer?.event("generate", "end", message: "\(answer.count) chars",
                                         data: .object(["answer": .string(answer)]))
 
                     // 5. Emit verification flags; wholly-ungrounded → defined state.
+                    var answerIsGrounded = true
                     if let verifier, let v = verdicts {
                         var verdictArr: [JSONValue] = []
                         var supportedCount = 0
@@ -546,6 +595,7 @@ public struct QueryService: QueryServing {
                                                "passRate": .double(Double(supportedCount) / Double(verdictArr.count))]))
                         }
                         if CitationVerifier.allUnsupported(v) {
+                            answerIsGrounded = false
                             continuation.yield(.state(.unsupportedAnswer))
                             tracker.noteTerminal("unsupportedAnswer")
                         } else {
@@ -555,28 +605,39 @@ public struct QueryService: QueryServing {
                         tracker.noteTerminal("answered")
                     }
 
-                    // 6. Entities to explore (#8) + follow-up suggestions (expressive #6).
-                    let entities = EntityExtractor.entities(in: answer, max: 4)
-                    if !entities.isEmpty { continuation.yield(.entities(entities)) }
-                    let followUps = FollowUpSuggester.suggest(query: q0, evidence: resolved, max: 3)
-                    if !followUps.isEmpty { continuation.yield(.suggestions(followUps)) }
+                    // Rejected drafts are terminal UI values, never knowledge.
+                    // Do not derive suggestions from, cache, or write an answer
+                    // that the verifier could not ground after correction.
+                    if answerIsGrounded {
+                        // 6. Entities to explore (#8) + follow-up suggestions (expressive #6).
+                        let entities = EntityExtractor.entities(in: answer, max: 4)
+                        if !entities.isEmpty { continuation.yield(.entities(entities)) }
+                        let followUps = FollowUpSuggester.suggest(
+                            query: q0,
+                            evidence: generationEvidence,
+                            max: 3
+                        )
+                        if !followUps.isEmpty { continuation.yield(.suggestions(followUps)) }
 
-                    // 7. Cache the completed answer for instant identical repeats.
-                    if let cache, history.isEmpty {
-                        await cache.store(query: q0, container: defaults.container ?? "",
-                                          corpusVersion: corpusVersion, answer: answer, sources: cards)
-                    }
-                    // 8. Write the exchange back to the engine as a conversation (#5),
-                    //    in a dedicated "-chat" container so it never pollutes the
-                    //    answer corpus but Supermemory still retains the interaction.
-                    if let conversationSink, !answer.isEmpty {
-                        let chatContainer = defaults.container.map { "\($0)-chat" }
-                        try? await conversationSink.ingestConversation(
-                            id: Self.conversationId(for: q0),
-                            messages: [("user", q0), ("assistant", answer)],
-                            container: chatContainer)
+                        // 7. Cache the completed answer for instant identical repeats.
+                        if let cache, history.isEmpty {
+                            await cache.store(query: q0, container: defaults.container ?? "",
+                                              corpusRevision: corpusRevision, answer: answer, sources: cards)
+                        }
+                        // 8. Write the exchange back to the engine as a conversation (#5),
+                        //    in a dedicated "-chat" container so it never pollutes the
+                        //    answer corpus but Supermemory still retains the interaction.
+                        if let conversationSink, !answer.isEmpty {
+                            let chatContainer = defaults.container.map { "\($0)-chat" }
+                            try? await conversationSink.ingestConversation(
+                                id: Self.conversationId(for: q0),
+                                messages: [("user", q0), ("assistant", answer)],
+                                container: chatContainer)
+                        }
                     }
                     await finishQuery(&tracker, egressBaseline: egressBaseline, continuation: continuation)
+                } catch is CancellationError {
+                    continuation.finish()
                 } catch {
                     for event in Self.lifecycleRetryEvents() { continuation.yield(event) }
                     tracker.noteTerminal("engineUnreachable")

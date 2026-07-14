@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import MnemoOrchestrator
 import MnemoCore
+import MnemoSupervisor
 
 @MainActor
 final class NotchController {
@@ -9,6 +10,8 @@ final class NotchController {
     let vm: NotchViewModel
     let sync: BackgroundSync
     let scheduler: WorkScheduler
+    let volumeIndexing: ExternalVolumeIndexingService
+    let egressMonitor: StackEgressMonitor
     let dictation: Dictation
     let narrator: Narrator
     let handler: AppCommandHandler
@@ -17,6 +20,8 @@ final class NotchController {
     /// Deep-observability bus for the dev dashboard; nil unless devtools enabled.
     let devTrace: DevTrace?
     private var syncTask: Task<Void, Never>?
+    private var stackTask: Task<Void, Never>?
+    private var volumeActivityTask: Task<Void, Never>?
 
     init(config: MnemoConfig) {
         // Localhost requests are auto-authenticated by the self-hosted engine;
@@ -34,6 +39,29 @@ final class NotchController {
                                   session: session)
         self.scheduler = WorkScheduler()
         self.sync = BackgroundSync(engine: engine, config: config, scheduler: scheduler)
+        self.volumeIndexing = ExternalVolumeIndexingService(
+            engine: engine,
+            scheduler: scheduler,
+            corpusIndex: sync.index
+        )
+        let starterProfileService = StarterProfileOnboardingService(
+            corpus: engine,
+            uploader: LocalFirstCorpusUploader(
+                directUploader: engine,
+                creator: engine,
+                scheduler: scheduler
+            ),
+            generator: ollama,
+            files: LocalStarterProfileFileAccess(scheduler: scheduler),
+            preferences: UserDefaultsStarterProfilePreferenceStore(),
+            container: "mnemo"
+        )
+        let permissionAuthorizer = SystemPermissionAuthorizer()
+        let permissionPreferenceStore = UserDefaultsPermissionOnboardingPreferenceStore()
+        let handler = AppCommandHandler(engine: engine, config: config, container: "mnemo")
+        let egressMonitor = handler.launcher.makeEgressMonitor()
+        self.handler = handler
+        self.egressMonitor = egressMonitor
 
         // Build a query service scoped to a container — lets `/scope` re-target
         // subsequent queries without rebuilding the whole controller.
@@ -88,20 +116,28 @@ final class NotchController {
                 chatRecallEnabled: true,
                 // M1a: stop discarding observability in the GUI path — record the
                 // query log, stamp the model id, and report the PER-QUERY egress
-                // delta so the notch trust footer reads real "0 outbound".
+                // delta so the notch trust footer covers both app requests and
+                // observed sockets in the managed process tree.
                 logSink: QueryLogSinkFactory.make(config: config.logging),
                 modelId: config.model.synthesis,
-                egressCounter: { LoopbackGuardURLProtocol.blockedCount },
+                egressCounter: {
+                    LoopbackGuardURLProtocol.blockedCount
+                        + egressMonitor.privacyViolationCount
+                },
                 trace: devTrace)
         }
-        let handler = AppCommandHandler(engine: engine, config: config, container: "mnemo")
-        self.handler = handler
         self.vm = NotchViewModel(defaultContainer: "mnemo",
                                  tone: ResponseTone(rawValue: config.uiTone) ?? .balanced,
-                                 makeService: makeService, scheduler: scheduler, commands: handler)
+                                 makeService: makeService, scheduler: scheduler, commands: handler,
+                                 permissionAuthorizer: permissionAuthorizer,
+                                 permissionPreferenceStore: permissionPreferenceStore,
+                                 starterProfileService: starterProfileService,
+                                 egressCounter: {
+                                     LoopbackGuardURLProtocol.blockedCount
+                                         + egressMonitor.privacyViolationCount
+                                 })
         self.dictation = Dictation()
         self.narrator = Narrator()
-        self.syncTask = sync.start()
 
         // Thumbs-up strengthens every cited memory (UI.md §8) — off the
         // interactive thread, and it can never crash the surface.
@@ -142,6 +178,50 @@ final class NotchController {
             self.dictation.stop()
             if !self.vm.state.query.isEmpty { self.vm.beginSubmit() }
         }
+
+        vm.onStackReady = { [weak self] in
+            guard let self else { return }
+            if self.syncTask == nil { self.syncTask = self.sync.start() }
+            Task(priority: .utility) { [weak self] in
+                guard let self else { return }
+                await self.egressMonitor.start()
+                await self.volumeIndexing.start()
+            }
+            Task { @MainActor [weak self] in
+                guard let self, !self.vm.showsPermissionOnboarding,
+                      await self.vm.offerStarterProfileAfterPermissions() else { return }
+                self.panel.makeKeyAndOrderFront(nil)
+            }
+        }
+
+        // The surface is the product entry point, so it also brings up the
+        // loopback-only stack. Start only after every stored property is ready;
+        // synchronization begins after the stack reports healthy.
+        self.volumeActivityTask = Task { [weak self, activities = volumeIndexing.activities] in
+            for await activity in activities {
+                guard !Task.isCancelled, let self else { return }
+                self.vm.updateVolumeActivity(activity)
+            }
+        }
+        self.stackTask = Task(priority: .utility) {
+            [weak self, supervisor = handler.supervisor] in
+            do {
+                try await supervisor.startAll()
+                guard !Task.isCancelled, let self else { return }
+                self.vm.stackDidStart()
+            } catch is CancellationError {
+                return
+            } catch {
+                self?.vm.stackDidFail()
+            }
+        }
+    }
+
+    /// Called only after AppDelegate owns this controller. Starting an async
+    /// weak-self task from `init` can race the caller's first strong assignment.
+    func offerInitialOnboarding() async {
+        guard await vm.offerPermissionOnboardingIfNeeded() else { return }
+        panel.makeKeyAndOrderFront(nil)
     }
 
     func summon() {
@@ -157,9 +237,9 @@ final class NotchController {
         vm.dismiss()
         narrator.stop()
         if dictation.isListening { dictation.stop() }
-        // Drop key back to the previous app, but keep the surface resident.
-        if panel.isKeyWindow { panel.orderOut(nil) }
-        panel.orderFrontRegardless()
+        // Drop key without ordering the resident panel out and back in. That
+        // round-trip produced a gray inactive-material flash on click-away.
+        if panel.isKeyWindow { panel.resignKey() }
     }
 
     /// Mouse-leave collapse hot rect (UI.md §5F): the notch plus the expanded
@@ -168,6 +248,8 @@ final class NotchController {
     var mouseOutHotRect: CGRect? {
         let phase = vm.state.phase
         let hasDraft = !vm.state.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        guard !vm.showsPermissionOnboarding, !vm.showsStarterProfile else { return nil }
+        guard !vm.volumeActivityPreventsAutoCollapse else { return nil }
         guard NotchHover.shouldAutoCollapse(
             phase: phase,
             hasDraft: hasDraft,

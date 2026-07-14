@@ -1,5 +1,6 @@
 import Foundation
 import MnemoCore
+import Darwin
 
 /// Launches and terminates the real stack processes.
 ///
@@ -19,28 +20,122 @@ public struct SystemProcessLauncher: ProcessLauncher {
     public func launch(_ p: ManagedProcess) async throws {
         switch p {
         case .ollama:
-            // Managed externally (launchd / brew services). If it is not up yet, start it.
-            if await boundAddress(.ollama) == nil {
-                let status = try run("/usr/bin/env", ["brew", "services", "start", "ollama"])
-                guard status == 0 else { throw LaunchError.commandFailed("brew services start ollama", status) }
+            let port = config.model.runtimeBaseURL.port ?? 11434
+            guard let bin = which("ollama") else { throw LaunchError.binaryNotFound("ollama") }
+            var disposition = try listenerDisposition(
+                for: .ollama,
+                on: port,
+                expectedExecutable: bin
+            )
+            if case let .occupied(sockets) = disposition,
+               try allListenersMatchExecutable(
+                   on: port,
+                   expectedExecutable: bin,
+                   requiredArguments: ["serve"]
+               ),
+               let brew = which("brew"),
+               let servicePID = brewServicePID(brew),
+               Set(sockets.map(\.pid)) == Set([servicePID]) {
+                // A Homebrew-managed Ollama is the one intentional takeover:
+                // stop the registered service, then re-inspect instead of
+                // signaling whatever happened to own the port.
+                _ = try? run(brew, ["services", "stop", "ollama"])
+                await waitForPortToClear(port)
+                disposition = try listenerDisposition(
+                    for: .ollama,
+                    on: port,
+                    expectedExecutable: bin
+                )
+            }
+            switch disposition {
+            case .vacant:
+                try spawnDetached(
+                    "/usr/bin/sandbox-exec",
+                    ["-p", EngineLaunchPolicy.sandboxProfile, bin, "serve"],
+                    logPath: logPath("ollama"),
+                    environment: EngineLaunchPolicy.ollamaEnvironment(config: config)
+                )
+            case .reusable:
+                break
+            case let .replaceableManaged(pids):
+                await terminateManagedPIDs(pids, on: port)
+                try requireVacantPort(port, process: .ollama)
+                try spawnDetached(
+                    "/usr/bin/sandbox-exec",
+                    ["-p", EngineLaunchPolicy.sandboxProfile, bin, "serve"],
+                    logPath: logPath("ollama"),
+                    environment: EngineLaunchPolicy.ollamaEnvironment(config: config)
+                )
+            case let .occupied(sockets):
+                throw LaunchError.portOccupied(.ollama, port, Set(sockets.map(\.pid)).sorted())
             }
             _ = try await ensureModelResident()
         case .engine:
-            if await boundAddress(.engine) != nil { return }   // already serving
+            let port = config.engine.baseURL.port ?? 6767
             guard let bin = engineBinaryPath() else { throw LaunchError.binaryNotFound("supermemory-server") }
-            try spawnDetached(bin, [], logPath: logPath("engine"))
+            switch try listenerDisposition(for: .engine, on: port, expectedExecutable: bin) {
+            case .vacant:
+                try launchEngine(bin)
+            case .reusable:
+                return
+            case let .replaceableManaged(pids):
+                await terminateManagedPIDs(pids, on: port)
+                try requireVacantPort(port, process: .engine)
+                try launchEngine(bin)
+            case let .occupied(sockets):
+                throw LaunchError.portOccupied(.engine, port, Set(sockets.map(\.pid)).sorted())
+            }
         case .smfs:
-            if await boundAddress(.smfs) != nil { return }     // already mounted
             guard let bin = which("smfs") else { throw LaunchError.binaryNotFound("smfs") }
             let mountPoint = (config.smfs.mountPoint as NSString).expandingTildeInPath
+            let port = 11111
+            let mountIsLive = await boundAddress(.smfs) != nil
+            if mountIsLive { return }
             try FileManager.default.createDirectory(atPath: mountPoint, withIntermediateDirectories: true)
-            let mounts = (try? capture("/sbin/mount", [])) ?? ""
-            if mounts.contains(" on \(mountPoint) ") {
-                _ = try? run(bin, ["unmount", mountPoint])
+            let requiredArguments = smfsRequiredArguments(mountPoint: mountPoint)
+            let disposition = try listenerDisposition(
+                for: .smfs,
+                on: port,
+                expectedExecutable: bin,
+                requiredArguments: requiredArguments,
+                requireSandboxMarker: false
+            )
+            if case let .occupied(sockets) = disposition {
+                throw LaunchError.portOccupied(.smfs, port, Set(sockets.map(\.pid)).sorted())
             }
-            let status = try run(bin, ["mount", "mnemo", "--path", mountPoint,
-                                       "--api-url", config.smfs.backingStore.absoluteString,
-                                       "--backend", "nfs"])
+            guard let mountOwnership = smfsMountOwnership(bin: bin, mountPoint: mountPoint)
+            else { throw LaunchError.commandFailed("inspect SMFS mount ownership", -1) }
+            if mountOwnership == .foreign {
+                throw LaunchError.foreignMount(mountPoint)
+            }
+            if mountOwnership == .managed {
+                let status = (try? run(bin, ["unmount", mountPoint])) ?? -1
+                if status != 0 {
+                    _ = try? run("/sbin/umount", ["-f", mountPoint])
+                }
+            }
+            switch disposition {
+            case .vacant:
+                break
+            case .reusable, .replaceableManaged:
+                await clearManagedListeners(
+                    .smfs,
+                    on: port,
+                    expectedExecutable: bin,
+                    requiredArguments: requiredArguments,
+                    requireSandboxMarker: false
+                )
+                try requireVacantPort(port, process: .smfs)
+            case let .occupied(sockets):
+                throw LaunchError.portOccupied(.smfs, port, Set(sockets.map(\.pid)).sorted())
+            }
+            let status = try run(
+                bin,
+                ["mount", "mnemo", "--path", mountPoint,
+                 "--api-url", config.smfs.backingStore.absoluteString,
+                 "--backend", "nfs"],
+                environment: EngineLaunchPolicy.localProcessEnvironment()
+            )
             guard status == 0 else { throw LaunchError.commandFailed("smfs mount", status) }
         }
     }
@@ -48,13 +143,47 @@ public struct SystemProcessLauncher: ProcessLauncher {
     public func terminate(_ p: ManagedProcess) async {
         switch p {
         case .ollama:
-            _ = try? run("/usr/bin/env", ["brew", "services", "stop", "ollama"])
+            if let bin = which("ollama") {
+                await clearManagedListeners(
+                    .ollama,
+                    on: config.model.runtimeBaseURL.port ?? 11434,
+                    expectedExecutable: bin
+                )
+            }
         case .engine:
-            _ = try? run("/usr/bin/pkill", ["-f", "supermemory-server"])
+            if let bin = engineBinaryPath() {
+                await clearManagedListeners(
+                    .engine,
+                    on: config.engine.baseURL.port ?? 6767,
+                    expectedExecutable: bin
+                )
+            }
         case .smfs:
             if let bin = which("smfs") {
                 let mountPoint = (config.smfs.mountPoint as NSString).expandingTildeInPath
-                _ = try? run(bin, ["unmount", mountPoint])
+                let requiredArguments = smfsRequiredArguments(mountPoint: mountPoint)
+                guard let disposition = try? listenerDisposition(
+                    for: .smfs,
+                    on: 11111,
+                    expectedExecutable: bin,
+                    requiredArguments: requiredArguments,
+                    requireSandboxMarker: false
+                ) else { return }
+                if case .occupied = disposition { return }
+                guard let mountOwnership = smfsMountOwnership(bin: bin, mountPoint: mountPoint),
+                      mountOwnership != .foreign
+                else { return }
+                if mountOwnership == .managed {
+                    let status = (try? run(bin, ["unmount", mountPoint])) ?? -1
+                    if status != 0 { _ = try? run("/sbin/umount", ["-f", mountPoint]) }
+                }
+                await clearManagedListeners(
+                    .smfs,
+                    on: 11111,
+                    expectedExecutable: bin,
+                    requiredArguments: requiredArguments,
+                    requireSandboxMarker: false
+                )
             }
         }
     }
@@ -63,26 +192,103 @@ public struct SystemProcessLauncher: ProcessLauncher {
         switch p {
         case .ollama, .engine:
             let port = p == .ollama
-                ? String(config.model.runtimeBaseURL.port ?? 11434)
-                : String(config.engine.baseURL.port ?? 6767)
-            let out = (try? capture("/usr/sbin/lsof", ["-iTCP:\(port)", "-sTCP:LISTEN", "-n", "-P"])) ?? ""
-            return LoopbackAudit.parseLSOF(out).first?.address
+                ? config.model.runtimeBaseURL.port ?? 11434
+                : config.engine.baseURL.port ?? 6767
+            let executable = p == .ollama ? which("ollama") : engineBinaryPath()
+            guard let executable,
+                  case let .reusable(socket) = try? listenerDisposition(
+                      for: p,
+                      on: port,
+                      expectedExecutable: executable
+                  )
+            else { return nil }
+            return socket.address
         case .smfs:
             // A mount-table entry alone can be a dead NFS mount. Require the
             // SMFS daemon registry and its loopback listener as well.
             let mountPoint = (config.smfs.mountPoint as NSString).expandingTildeInPath
-            let mounts = (try? capture("/sbin/mount", [])) ?? ""
-            guard mounts.contains(" on \(mountPoint) "), let bin = which("smfs") else { return nil }
-            let daemonList = (try? capture(bin, ["list"])) ?? ""
-            guard daemonList.contains(mountPoint) else { return nil }
+            guard let bin = which("smfs"),
+                  smfsMountOwnership(bin: bin, mountPoint: mountPoint) == .managed
+            else { return nil }
             let listeners = (try? capture(
                 "/usr/sbin/lsof",
                 ["-iTCP:11111", "-sTCP:LISTEN", "-n", "-P"]
             )) ?? ""
-            let live = LoopbackAudit.parseLSOF(listeners)
-                .contains { LoopbackAudit.isLoopbackAddress($0.address) }
-            return live ? "127.0.0.1:11111" : nil
+            let sockets = LoopbackAudit.parseLSOF(listeners)
+            guard !sockets.isEmpty,
+                  sockets.allSatisfy({ LoopbackAudit.isLoopbackAddress($0.address) })
+            else { return nil }
+            for socket in sockets {
+                guard let identity = try? processIdentity(socket.pid),
+                      EngineLaunchPolicy.isManagedIdentity(
+                          identity,
+                          expectedExecutable: bin,
+                          requiredArguments: smfsRequiredArguments(mountPoint: mountPoint),
+                          requireSandboxMarker: false
+                      )
+                else { return nil }
+            }
+            return sockets[0].address
         }
+    }
+
+    /// Returns socket-table observations for the managed roots and their child
+    /// processes. Callers can feed this into `StackEgressMonitor`; the result is
+    /// process-wide observation, not syscall-level attempt interception.
+    public func observedStackConnections() -> StackNetworkSnapshot {
+        // Include the calling Mnemo process itself in addition to the three
+        // managed service roots. URLProtocol blocks app HTTP egress; this also
+        // observes raw sockets and child helpers that bypass URL loading.
+        var roots: Set<Int> = [Int(getpid())]
+        let specifications: [(ManagedProcess, Int, String?, Bool)] = [
+            (.ollama, config.model.runtimeBaseURL.port ?? 11434, which("ollama"), true),
+            (.engine, config.engine.baseURL.port ?? 6767, engineBinaryPath(), true),
+            (.smfs, 11111, which("smfs"), false),
+        ]
+        for (process, port, executable, requireMarker) in specifications {
+            guard let executable,
+                  let sockets = try? checkedListeners(on: port),
+                  !sockets.isEmpty
+            else { return .unavailable(.managedProcessesNotFound) }
+            var identities: [Int: ProcessIdentity] = [:]
+            for pid in Set(sockets.map(\.pid)) {
+                guard let identity = try? processIdentity(pid) else {
+                    return .unavailable(.processInspectionFailed)
+                }
+                identities[pid] = identity
+            }
+            let managed = EngineLaunchPolicy.managedPIDs(
+                among: sockets,
+                identities: identities,
+                expectedExecutable: executable,
+                requiredArguments: expectedArguments(for: process),
+                requireSandboxMarker: requireMarker
+            )
+            guard managed == Set(sockets.map(\.pid)) else {
+                return .unavailable(.processInspectionFailed)
+            }
+            roots.formUnion(managed)
+        }
+        guard !roots.isEmpty else { return .unavailable(.managedProcessesNotFound) }
+        guard let processList = try? capture("/bin/ps", ["-axo", "pid=,ppid="])
+        else { return .unavailable(.processTreeInspectionFailed) }
+        let pids = StackEgressAudit.processTreePIDs(roots: roots, processList: processList)
+            .filter { kill(pid_t($0), 0) == 0 || errno == EPERM }
+        let pidList = pids.sorted().map(String.init).joined(separator: ",")
+        guard let socketResult = try? captureResult(
+            "/usr/sbin/lsof",
+            ["-n", "-P", "-a", "-p", pidList, "-i"]
+        ) else { return .unavailable(.socketInspectionFailed) }
+        let connections = StackEgressAudit.parseLSOF(socketResult.output)
+        guard socketResult.status == 0 || !connections.isEmpty else {
+            return .unavailable(.socketInspectionFailed)
+        }
+        return .observed(connections)
+    }
+
+    public func makeEgressMonitor() -> StackEgressMonitor {
+        let launcher = self
+        return StackEgressMonitor { launcher.observedStackConnections() }
     }
 
     // MARK: - model residency (M0 Task 2: warm model, fail loudly if missing)
@@ -116,58 +322,7 @@ public struct SystemProcessLauncher: ProcessLauncher {
         case binaryNotFound(String)
         case modelNotLoaded(String)
         case commandFailed(String, Int32)
-    }
-
-    func engineBinaryPath() -> String? {
-        let candidates = [
-            NSHomeDirectory() + "/.local/bin/supermemory-server",
-            NSHomeDirectory() + "/.supermemory/bin/supermemory-server",
-        ]
-        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) } ?? which("supermemory-server")
-    }
-
-    func which(_ name: String) -> String? {
-        let paths = (environment["PATH"] ?? ProcessInfo.processInfo.environment["PATH"] ?? "")
-            .split(separator: ":").map(String.init)
-            + [NSHomeDirectory() + "/.local/bin", "/opt/homebrew/bin", "/usr/local/bin"]
-        return paths.map { "\($0)/\(name)" }.first { FileManager.default.isExecutableFile(atPath: $0) }
-    }
-
-    func logPath(_ name: String) -> String {
-        let dir = NSHomeDirectory() + "/Library/Logs/Mnemo"
-        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-        return "\(dir)/\(name).log"
-    }
-
-    @discardableResult
-    func run(_ path: String, _ args: [String]) throws -> Int32 {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: path)
-        p.arguments = args
-        try p.run()
-        p.waitUntilExit()
-        return p.terminationStatus
-    }
-
-    /// Spawn a long-running process detached from this one, logging to a file.
-    func spawnDetached(_ path: String, _ args: [String], logPath: String) throws {
-        FileManager.default.createFile(atPath: logPath, contents: nil)
-        let log = FileHandle(forWritingAtPath: logPath)
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: path)
-        p.arguments = args
-        if let log { p.standardOutput = log; p.standardError = log }
-        try p.run()
-    }
-
-    public func capture(_ path: String, _ args: [String]) throws -> String {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: path)
-        p.arguments = args
-        let pipe = Pipe()
-        p.standardOutput = pipe
-        try p.run()
-        p.waitUntilExit()
-        return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        case portOccupied(ManagedProcess, Int, [Int])
+        case foreignMount(String)
     }
 }

@@ -2,8 +2,7 @@ import SwiftUI
 import MnemoOrchestrator
 
 /// Content for the notch surface (reference: Tests/Fixtures/reference): the
-/// Liquid-Glass tray and the answer zone. Nothing else renders in the notch —
-/// the richer data (reasoning, related, suggestions) stays in state for mnemoctl.
+/// Liquid-Glass tray, live reasoning trace, and answer zone.
 
 // MARK: - Bottom glass tray (+ / pill field / mic-or-send / home indicator)
 
@@ -13,7 +12,6 @@ struct InputTray: View {
     @FocusState.Binding var focused: Bool
     let searching: Bool
     let reduceMotion: Bool
-    let showHandle: Bool
     @Environment(\.colorSchemeContrast) private var contrast
 
     private var hasText: Bool { !vm.state.query.isEmpty }
@@ -25,7 +23,20 @@ struct InputTray: View {
     // bottom of the reserved tray zone (the glass fade rises behind it).
     var body: some View {
         VStack(spacing: 0) {
-            Spacer(minLength: 0)
+            if let activity = vm.volumeActivityText, !searching {
+                HStack(spacing: 6) {
+                    Image(systemName: "externaldrive.fill")
+                    Text(activity).lineLimit(1)
+                }
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.white.opacity(0.72))
+                .frame(height: Surface.bandFade)
+                .padding(.horizontal, 18)
+                .accessibilityElement(children: .combine)
+            } else {
+                Spacer(minLength: 0)
+                    .frame(height: Surface.bandFade)
+            }
             HStack(spacing: 10) {
                 pill
                 // The send/mic control is hidden while working, so a second
@@ -35,7 +46,7 @@ struct InputTray: View {
             }
             .padding(.horizontal, 13)
             .frame(height: Surface.bandHeight)
-            if showHandle { HomeIndicator().frame(height: Surface.trayHandle) }
+            HomeIndicator().frame(height: Surface.trayHandle)
         }
     }
 
@@ -48,7 +59,7 @@ struct InputTray: View {
                 SixDotSpinner()
                     .frame(width: Surface.spinnerRing + 6, height: Surface.spinnerRing + 6)
             } else {
-                TextField("Ask Mnemo", text: $vm.state.query)
+                TextField(vm.inputPlaceholder, text: $vm.state.query)
                     .textFieldStyle(.plain)
                     .font(.system(size: 15))
                     .foregroundStyle(.white)
@@ -270,15 +281,15 @@ struct AnswerZone: View {
             .foregroundStyle(.white)
         switch t.recovery {
         case .broaden:
-            Button("Broaden search") { Task { await vm.recover(.broaden) } }.buttonStyle(.glass)
+            Button("Broaden search") { vm.beginRecovery(.broaden) }.buttonStyle(.glass)
         case .restartEngine:
-            Button("Restart engine") { Task { await vm.recover(.restartEngine) } }.buttonStyle(.glassProminent)
+            Button("Restart engine") { vm.beginRecovery(.restartEngine) }.buttonStyle(.glassProminent)
         case .loadModel:
-            Button("Load model") { Task { await vm.recover(.loadModel) } }.buttonStyle(.glassProminent)
+            Button("Load model") { vm.beginRecovery(.loadModel) }.buttonStyle(.glassProminent)
         case .waitAndRetry:
-            Button("Try again") { Task { await vm.recover(.waitAndRetry) } }.buttonStyle(.glass)
+            Button("Try again") { vm.beginRecovery(.waitAndRetry) }.buttonStyle(.glass)
         case .addFiles:
-            Button("Open memory folder") { Task { await vm.recover(.addFiles) } }.buttonStyle(.glassProminent)
+            Button("Open memory folder") { vm.beginRecovery(.addFiles) }.buttonStyle(.glassProminent)
         }
     }
 

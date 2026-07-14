@@ -54,10 +54,25 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 </plist>
 PLIST
 
-echo "== ad-hoc signing (nested bundle first, then the app) =="
+SIGN_IDENTITY="${MNEMO_CODESIGN_IDENTITY:-}"
+if [ -z "$SIGN_IDENTITY" ]; then
+  SIGN_IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null \
+    | awk '/Apple Development/ { print $2; exit }')"
+fi
+if [ -z "$SIGN_IDENTITY" ]; then
+  SIGN_IDENTITY="-"
+  echo "== no stable signing identity found; falling back to ad-hoc signing =="
+else
+  echo "== signing with stable identity $SIGN_IDENTITY =="
+fi
+
+# A stable certificate gives TCC a stable designated requirement. Ad-hoc signing
+# keys grants to the binary CDHash, which changes on every rebuild and makes
+# macOS ask for Microphone and Speech Recognition again.
 [ -d "$APP/Contents/Resources/Mnemo_MnemoApp.bundle" ] && \
-  codesign --force --sign - "$APP/Contents/Resources/Mnemo_MnemoApp.bundle" 2>/dev/null || true
-codesign --force --sign - "$APP"
+  codesign --force --sign "$SIGN_IDENTITY" --timestamp=none \
+    "$APP/Contents/Resources/Mnemo_MnemoApp.bundle" 2>/dev/null || true
+codesign --force --sign "$SIGN_IDENTITY" --timestamp=none "$APP"
 
 echo "== done: $APP =="
 codesign -dv "$APP" 2>&1 | grep -E 'Identifier|Signature' || true

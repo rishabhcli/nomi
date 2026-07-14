@@ -1,4 +1,5 @@
 import SwiftUI
+import MnemoOrchestrator
 
 /// Centralized motion tokens (UI.md §7/§13) — springs measured from the
 /// reference recordings. No scattered magic numbers.
@@ -54,10 +55,13 @@ enum Surface {
     static let trayHandle: CGFloat = 20           // home-indicator zone below the controls
     /// Full glass tray = blend + controls + handle. The desktop shows through it.
     static var trayHeight: CGFloat { bandFade + bandHeight + trayHandle }
-    /// Liquid Glass rises through the bottom fraction of the surface, melting up
-    /// into the opaque black body (UI.md §3). Floored at `trayHeight` so short
-    /// states still get the full control tray; a third of a tall answer.
-    static let glassFraction: CGFloat = 0.36
+    static let searchingBodyHeight: CGFloat = 170 // live activity trace above the tray
+    // Keeps all ordinary onboarding content above the bottom glass transition;
+    // only glass-styled actions and the home indicator live inside that layer.
+    static let starterProfileBodyHeight: CGFloat = 420
+    /// Liquid Glass rises through exactly the bottom fraction of every expanded
+    /// surface, melting into the opaque black body (UI.md §3).
+    static let glassFraction = SurfaceMaterialGeometry.defaultGlassFraction
     static let answerCap: CGFloat = 400           // answer zone scrolls beyond this
     static let answerFont: CGFloat = 17           // reference: large clean white text
     static let bottomRadius: CGFloat = 46         // expanded bottom corners (convex)
