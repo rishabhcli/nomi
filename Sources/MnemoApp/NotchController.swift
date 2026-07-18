@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 import MnemoOrchestrator
 import MnemoCore
@@ -17,12 +18,14 @@ final class NotchController {
     let handler: AppCommandHandler
     private(set) var notchRect: CGRect
     private(set) var screenFrame: CGRect
+    private(set) var anchoredDisplayID: UInt32?
     /// Deep-observability bus for the dev dashboard; nil unless devtools enabled.
     let devTrace: DevTrace?
     private var syncTask: Task<Void, Never>?
     private var stackTask: Task<Void, Never>?
     private var volumeActivityTask: Task<Void, Never>?
     private var hosting: NSHostingView<NotchSurfaceView>?
+    private var panelInteractionCancellable: AnyCancellable?
 
     init(config: MnemoConfig) {
         // Localhost requests are auto-authenticated by the self-hosted engine;
@@ -152,6 +155,7 @@ final class NotchController {
         let notch = screen.mnemoNotchRectOrVirtual
         self.notchRect = notch
         self.screenFrame = screen.frame
+        self.anchoredDisplayID = screen.mnemoDisplayID
         // The panel is sized once for the largest state (+ shadow bleed) and
         // NEVER resized or moved; all growth is SwiftUI content animation
         // (UI.md §4 — resizing the NSWindow per frame is the glitch).
@@ -161,8 +165,18 @@ final class NotchController {
                                height: max(notch.height, 24) + Surface.maxBodyHeight + Surface.shadowBleed)
         let rect = NotchGeometry.panelRect(screenFrame: screen.frame, notch: notch, panelSize: panelSize)
         self.panel = NotchPanel(contentRect: rect)
+        let residentPanel = panel
+        residentPanel.setSurfaceSize(CGSize(width: notch.width, height: max(notch.height, 24)))
         let hosting = NSHostingView(
-            rootView: NotchSurfaceView(vm: vm, dictation: dictation, narrator: narrator, notchSize: notch.size))
+            rootView: NotchSurfaceView(
+                vm: vm,
+                dictation: dictation,
+                narrator: narrator,
+                notchSize: notch.size,
+                onSurfaceSizeChange: { [weak residentPanel] size in
+                    residentPanel?.setSurfaceSize(size)
+                }
+            ))
         self.hosting = hosting
         hosting.sizingOptions = []   // content must never drive the window size
         panel.contentView = hosting
@@ -171,6 +185,28 @@ final class NotchController {
         // summon is purely a content morph, never a window pop-in.
         hosting.layoutSubtreeIfNeeded()
         panel.orderFrontRegardless()
+
+        // The resident window is sized for the largest answer. While collapsed,
+        // make its transparent remainder click-through and ineligible for key
+        // status; every expanded phase (and listening) restores interaction.
+        let viewModel = vm
+        panelInteractionCancellable = vm.$state
+            .map(\.phase)
+            .removeDuplicates()
+            .combineLatest(dictation.$isListening)
+            .map { [weak viewModel] phase, isListening in
+                let showsOnboarding = viewModel?.showsPermissionOnboarding == true
+                    || viewModel?.showsStarterProfile == true
+                return NotchPanelInteraction.acceptsEvents(
+                    phase: phase,
+                    isListening: isListening,
+                    showsOnboarding: showsOnboarding
+                )
+            }
+            .removeDuplicates()
+            .sink { [weak residentPanel] accepts in
+                residentPanel?.setAcceptsInteraction(accepts)
+            }
 
         // Voice endpointing: when the user stops speaking, auto-stop the mic and
         // submit what was transcribed — no tap needed. The surface goes straight
@@ -192,6 +228,7 @@ final class NotchController {
             Task { @MainActor [weak self] in
                 guard let self, !self.vm.showsPermissionOnboarding,
                       await self.vm.offerStarterProfileAfterPermissions() else { return }
+                self.refreshPanelInteraction()
                 self.panel.makeKeyAndOrderFront(nil)
             }
         }
@@ -223,7 +260,16 @@ final class NotchController {
     /// weak-self task from `init` can race the caller's first strong assignment.
     func offerInitialOnboarding() async {
         guard await vm.offerPermissionOnboardingIfNeeded() else { return }
+        refreshPanelInteraction()
         panel.makeKeyAndOrderFront(nil)
+    }
+
+    private func refreshPanelInteraction() {
+        panel.setAcceptsInteraction(NotchPanelInteraction.acceptsEvents(
+            phase: vm.state.phase,
+            isListening: dictation.isListening,
+            showsOnboarding: vm.showsPermissionOnboarding || vm.showsStarterProfile
+        ))
     }
 
     func summon() {
@@ -233,17 +279,41 @@ final class NotchController {
         guard vm.state.phase == .idle, !vm.isQuerying else { return }
         reanchorToPointerDisplay()
         vm.summon()
+        refreshPanelInteraction()
         panel.makeKeyAndOrderFront(nil)   // caret live immediately
     }
 
-    /// Hover and hotkey summons follow the pointer across displays. Re-anchoring
-    /// happens only while idle, never during a visible morph or live query.
+    /// Hover and hotkey summons follow the pointer across displays.
     private func reanchorToPointerDisplay() {
+        guard let screen = screenContainingPointer(in: NSScreen.screens) ?? NSScreen.main else { return }
+        reanchor(to: screen)
+    }
+
+    /// Recompute the anchor after a display is added, removed, rearranged, or
+    /// rescaled. Keep the current physical display when it still exists; if it
+    /// disappeared, migrate the live surface to the main surviving display.
+    func screenParametersDidChange() {
+        let screens = NSScreen.screens
+        guard !screens.isEmpty else { return }
+        let current = anchoredDisplayID.flatMap { displayID in
+            screens.first { $0.mnemoDisplayID == displayID }
+        } ?? screens.first { anchoredDisplayID == nil && $0.frame == screenFrame }
+        let destination = current ?? NSScreen.main
+            ?? screenContainingPointer(in: screens) ?? screens[0]
+        reanchor(to: destination)
+    }
+
+    private func screenContainingPointer(in screens: [NSScreen]) -> NSScreen? {
         let location = NSEvent.mouseLocation
-        guard let screen = NSScreen.screens.first(where: {
-            NSMouseInRect(location, $0.frame, false)
-        }) ?? NSScreen.main else { return }
+        return screens.first { NSMouseInRect(location, $0.frame, false) }
+    }
+
+    /// Geometry-only migration: the query/view-model state is deliberately left
+    /// untouched so an onboarding flow, dictation, or streaming answer survives.
+    private func reanchor(to screen: NSScreen) {
         let notch = screen.mnemoNotchRectOrVirtual
+        let notchSizeChanged = notch.size != notchRect.size
+        anchoredDisplayID = screen.mnemoDisplayID
         guard screen.frame != screenFrame || notch != notchRect else { return }
 
         let panelSize = CGSize(
@@ -258,12 +328,18 @@ final class NotchController {
         screenFrame = screen.frame
         notchRect = notch
         panel.setFrame(frame, display: true)
-        hosting?.rootView = NotchSurfaceView(
-            vm: vm,
-            dictation: dictation,
-            narrator: narrator,
-            notchSize: notch.size
-        )
+        panel.updatePointerLocation(NSEvent.mouseLocation)
+        if notchSizeChanged {
+            hosting?.rootView = NotchSurfaceView(
+                vm: vm,
+                dictation: dictation,
+                narrator: narrator,
+                notchSize: notch.size,
+                onSurfaceSizeChange: { [weak panel = self.panel] size in
+                    panel?.setSurfaceSize(size)
+                }
+            )
+        }
         hosting?.layoutSubtreeIfNeeded()
     }
 

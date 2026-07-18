@@ -567,10 +567,15 @@ public struct QueryService: QueryServing {
 
                     if selfCorrect, let v = verdicts, CitationVerifier.allUnsupported(v) {
                         continuation.yield(.retrying("That wasn't grounded — reconsidering using only your files…"))
+                        // This is a constrained grounding correction, not another
+                        // multi-hop search. Low effort is sufficient to obey the
+                        // strict context-only instruction and avoids turning a
+                        // truthful refusal into a minute-long second answer pass.
+                        let correctionEffort = effort.routing
                         let strict = Prompt.compose(
-                            preamble: assembled.preamble, effort: effort.multihop,
+                            preamble: assembled.preamble, effort: correctionEffort,
                             style: directive + " Answer ONLY from the provided context; if it isn't there, say you don't know.")
-                        answer = try await generate(system: strict, generationEffort: effort.multihop)
+                        answer = try await generate(system: strict, generationEffort: correctionEffort)
                         verdicts = await verifier?.verify(answer: answer, evidence: assembled.evidence)
                     }
                     await tracer?.event("generate", "end", message: "\(answer.count) chars",

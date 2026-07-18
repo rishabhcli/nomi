@@ -107,6 +107,39 @@ public enum NotchHover {
     }
 }
 
+/// The resident panel is much larger than the visible idle collar. Keep that
+/// transparent area out of AppKit's event path until the surface is actually
+/// expanded or listening.
+public enum NotchPanelInteraction {
+    public static func acceptsEvents(phase: NotchPhase,
+                                     isListening: Bool,
+                                     showsOnboarding: Bool) -> Bool {
+        phase != .idle || isListening || showsOnboarding
+    }
+
+    /// The SwiftUI surface is top-centered inside a resident maximum-size
+    /// panel. Only that visible rectangle should participate in AppKit mouse
+    /// routing; the rest must behave like ordinary desktop space.
+    public static func surfaceRect(panelFrame: CGRect, surfaceSize: CGSize) -> CGRect {
+        let width = max(0, min(surfaceSize.width, panelFrame.width))
+        let height = max(0, min(surfaceSize.height, panelFrame.height))
+        return CGRect(
+            x: panelFrame.midX - width / 2,
+            y: panelFrame.maxY - height,
+            width: width,
+            height: height
+        )
+    }
+
+    public static func capturesMouse(allowsInteraction: Bool,
+                                     pointer: CGPoint,
+                                     panelFrame: CGRect,
+                                     surfaceSize: CGSize) -> Bool {
+        allowsInteraction && surfaceRect(panelFrame: panelFrame, surfaceSize: surfaceSize)
+            .contains(pointer)
+    }
+}
+
 /// Pure hit geometry for the collar's voice control. The expanded body is
 /// deliberately excluded so text fields, source chips, and recovery buttons
 /// never double as dictation triggers.

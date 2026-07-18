@@ -4,6 +4,11 @@ import AppKit
 import MnemoOrchestrator
 
 extension NSScreen {
+    var mnemoDisplayID: UInt32? {
+        guard let id = cgDirectDisplayID, id != kCGNullDirectDisplay else { return nil }
+        return id
+    }
+
     var mnemoNotchRect: CGRect? {
         NotchGeometry.rect(screenFrame: frame, safeAreaTop: safeAreaInsets.top,
                            auxLeftWidth: auxiliaryTopLeftArea?.width ?? 0,

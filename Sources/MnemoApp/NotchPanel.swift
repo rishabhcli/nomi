@@ -1,11 +1,16 @@
 // Agent-B audit B-005
 // Agent-B audit B-023
 import AppKit
+import MnemoOrchestrator
 
 /// Non-activating panel hosting the notch surface (UI.md §4): floats above the
 /// menu bar so the collar can sit over the notch, never activates our app, but
 /// can become key while expanded so typing is immediate.
 final class NotchPanel: NSPanel {
+    private(set) var acceptsInteraction = false
+    private var surfaceSize: CGSize = .zero
+    private var pointerLocation: CGPoint = .zero
+
     init(contentRect: NSRect) {
         super.init(contentRect: contentRect,
                    styleMask: [.nonactivatingPanel, .borderless],
@@ -22,7 +27,34 @@ final class NotchPanel: NSPanel {
         hidesOnDeactivate = false
         isMovable = false
         animationBehavior = .none   // all motion is SwiftUI's; never the window's
+        pointerLocation = NSEvent.mouseLocation
+        ignoresMouseEvents = true
     }
 
-    override var canBecomeKey: Bool { true }
+    override var canBecomeKey: Bool { acceptsInteraction }
+
+    func setAcceptsInteraction(_ acceptsInteraction: Bool) {
+        self.acceptsInteraction = acceptsInteraction
+        refreshMouseCapture()
+    }
+
+    func setSurfaceSize(_ size: CGSize) {
+        guard size.width.isFinite, size.height.isFinite else { return }
+        surfaceSize = CGSize(width: max(0, size.width), height: max(0, size.height))
+        refreshMouseCapture()
+    }
+
+    func updatePointerLocation(_ location: CGPoint) {
+        pointerLocation = location
+        refreshMouseCapture()
+    }
+
+    private func refreshMouseCapture() {
+        ignoresMouseEvents = !NotchPanelInteraction.capturesMouse(
+            allowsInteraction: acceptsInteraction,
+            pointer: pointerLocation,
+            panelFrame: frame,
+            surfaceSize: surfaceSize
+        )
+    }
 }

@@ -30,7 +30,9 @@ self_heal_enabled = true
 
 [retrieval]
 default_mode = "hybrid"                 # memories | hybrid
-rerank = true
+# The self-hosted engine has no Cloudflare AI binding; enabling its built-in
+# reranker only throws and then falls back to the same local similarity order.
+rerank = false
 threshold = 0.35
 limit = 12
 max_hops = 6

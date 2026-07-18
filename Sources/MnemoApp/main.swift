@@ -77,11 +77,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.controller?.vm.refreshPermissionOnboarding()
             }
         }
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: app,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.controller?.screenParametersDidChange()
+            }
+        }
         // No menu-bar item: the notch itself is the only affordance (UI.md §4).
 
         // Notch-hover summon + mouse-leave collapse (UI.md §5A/F).
         hover = HoverDetector(
             hoverZonePx: CGFloat(config.uiNotchHoverZonePx),
+            onMove: { [weak self] location in
+                self?.controller?.panel.updatePointerLocation(location)
+            },
             onArm: { [weak self] in self?.controller.summon() },
             onLeave: { [weak self] in self?.controller.dismiss() },
             leaveRegion: { [weak self] in self?.controller.mouseOutHotRect })

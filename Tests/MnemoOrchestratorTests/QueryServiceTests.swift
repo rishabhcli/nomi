@@ -46,6 +46,11 @@ private actor GenerationCallRecorder {
     func record() { count += 1 }
 }
 
+private actor GenerationEffortRecorder {
+    private(set) var efforts: [String] = []
+    func record(_ effort: String) { efforts.append(effort) }
+}
+
 private struct CountingUngroundedGenerator: Generating {
     let recorder: GenerationCallRecorder
 
@@ -53,6 +58,24 @@ private struct CountingUngroundedGenerator: Generating {
         AsyncThrowingStream { continuation in
             Task {
                 await recorder.record()
+                continuation.yield("The moon is made of cheese.")
+                continuation.finish()
+            }
+        }
+    }
+}
+
+private struct EffortRecordingUngroundedGenerator: Generating {
+    let recorder: GenerationEffortRecorder
+
+    func stream(system: String, prompt: String) -> AsyncThrowingStream<String, Error> {
+        stream(system: system, prompt: prompt, effort: "low")
+    }
+
+    func stream(system: String, prompt: String, effort: String) -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { continuation in
+            Task {
+                await recorder.record(effort)
                 continuation.yield("The moon is made of cheese.")
                 continuation.finish()
             }
@@ -119,6 +142,41 @@ private func makeService(hitsByMode: [String: [Retrieved]],
 }
 
 final class QueryServiceTests: XCTestCase {
+    func testGroundingRetryUsesLowEffortInsteadOfMultihopEffort() async throws {
+        let generation = GenerationEffortRecorder()
+        let service = QueryService(
+            retriever: FakeRetriever(hitsByMode: ["memories": [hit]]),
+            generator: EffortRecordingUngroundedGenerator(recorder: generation),
+            spans: SpanResolver(docs: FakeDocsStore(records: [:])),
+            defaults: SearchDefaults(
+                searchMode: "memories",
+                rerank: false,
+                threshold: 0.35,
+                limit: 12,
+                container: "mnemo"
+            ),
+            mountRoot: "",
+            effort: EffortPolicy(
+                routing: "low",
+                extraction: "low",
+                synthesis: "medium",
+                multihop: "high"
+            ),
+            verifier: CitationVerifier(
+                backend: AlwaysRejectingVerificationBackend(),
+                simThreshold: 0.5
+            ),
+            selfCorrect: true
+        )
+
+        for try await _ in service.ask("Where is the launch plan?") {}
+
+        let efforts = await generation.efforts
+        XCTAssertEqual(efforts.count, 2)
+        XCTAssertEqual(efforts.last, "low",
+                       "a strict grounding correction should not pay the multihop reasoning cost")
+    }
+
     func testUnsupportedRetryIsNeitherCachedNorWrittenToConversationMemory() async throws {
         let generation = GenerationCallRecorder()
         let conversations = ConversationWriteRecorder()

@@ -17,10 +17,12 @@ struct NotchSurfaceView: View {
     @ObservedObject var dictation: Dictation
     @ObservedObject var narrator: Narrator
     var notchSize: CGSize
+    var onSurfaceSizeChange: (CGSize) -> Void = { _ in }
 
     @FocusState private var focused: Bool
     @State private var answerHeight: CGFloat = 0   // measured once per content change
     @State private var heldDictation = false       // push-to-talk started by a hold (vs a tap)
+    @State private var announcementTracker = SurfaceAnnouncementTracker()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorSchemeContrast) private var contrast
     @Namespace private var glassNS
@@ -35,6 +37,9 @@ struct NotchSurfaceView: View {
     /// The glass tray shows in every expanded state except the listening drop.
     private var showsTray: Bool { phase != .idle && !listening && !showsOnboarding }
     private var showsGlass: Bool { (phase != .idle || showsOnboarding) && !listening }
+    private var privacyAccessibilityValue: String {
+        SurfaceAccessibility.privacyValue(for: vm.privacy)
+    }
     /// One value drives width + height + radius so exactly one spring runs.
     private var geometry: SurfaceGeometry {
         SurfaceGeometry(phase: phase, listening: listening,
@@ -84,6 +89,9 @@ struct NotchSurfaceView: View {
         // active even when another app becomes key; the body itself remains #000.
         .environment(\.controlActiveState, .active)
         .frame(width: geo.width, height: geo.height, alignment: .top)
+        .onGeometryChange(for: CGSize.self, of: { $0.size }) { size in
+            onSurfaceSizeChange(size)
+        }
         .clipShape(NotchShape(topCornerRadius: geo.shoulder, bottomCornerRadius: geo.radius))
         // A hairline edge separates the black slab from a dark desktop without
         // breaking the seamless top: the stroke is clear at the very top (where
@@ -119,6 +127,10 @@ struct NotchSurfaceView: View {
             if p == .searching { answerHeight = 0 }
             if p == .input || p == .answering { focused = true }
         }
+        .onChange(of: vm.state) { _, newState in
+            guard let announcement = announcementTracker.next(for: newState) else { return }
+            AccessibilityAnnouncer.post(announcement.text)
+        }
         // The transcript→query bridge lives on the ALWAYS-mounted surface — the
         // tray (which used to hold it) is unmounted during the listening drop,
         // so binding it here is what lets a dictated phrase reach submit.
@@ -148,31 +160,35 @@ struct NotchSurfaceView: View {
             .frame(width: target.width, height: target.height)
             .contentShape(Rectangle())
             .accessibilityLabel("Dictate")
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction { activateDictation() }
             // Click the notch -> voice: toggle on-device dictation. Click again
             // while listening stops and submits; press-hold is push-to-talk.
-        .onTapGesture {
-            if dictation.isListening {
-                dictation.stop()
-                if !vm.state.query.isEmpty { vm.beginSubmit() }
-            } else {
+            .onTapGesture { activateDictation() }
+            .onLongPressGesture(minimumDuration: 0.35, maximumDistance: 50) {
+                guard !dictation.isListening else { return }
                 if vm.state.phase == .idle { vm.summon() }
                 dictation.start()
+                heldDictation = true
+            } onPressingChanged: { pressing in
+                guard !pressing else { return }
+                // Release ends push-to-talk — but only if a hold started it, so a
+                // quick tap's toggle isn't immediately cancelled by the release.
+                if heldDictation, dictation.isListening {
+                    dictation.stop()
+                    if !vm.state.query.isEmpty { vm.beginSubmit() }
+                }
+                heldDictation = false
             }
-        }
-        .onLongPressGesture(minimumDuration: 0.35, maximumDistance: 50) {
-            guard !dictation.isListening else { return }
+    }
+
+    private func activateDictation() {
+        if dictation.isListening {
+            dictation.stop()
+            if !vm.state.query.isEmpty { vm.beginSubmit() }
+        } else {
             if vm.state.phase == .idle { vm.summon() }
             dictation.start()
-            heldDictation = true
-        } onPressingChanged: { pressing in
-            guard !pressing else { return }
-            // Release ends push-to-talk — but only if a hold started it, so a
-            // quick tap's toggle isn't immediately cancelled by the release.
-            if heldDictation, dictation.isListening {
-                dictation.stop()
-                if !vm.state.query.isEmpty { vm.beginSubmit() }
-            }
-            heldDictation = false
         }
     }
 
@@ -284,6 +300,7 @@ struct NotchSurfaceView: View {
                 .padding(.leading, 13).padding(.bottom, 11)
                 .help(vm.privacy == .clean ? "On-device · 0 observed outbound" : "Outbound observed — see log")
                 .accessibilityLabel("Privacy status")
+                .accessibilityValue(privacyAccessibilityValue)
         }
     }
 
