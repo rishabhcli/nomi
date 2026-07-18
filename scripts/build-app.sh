@@ -11,6 +11,14 @@ cd "$(dirname "$0")/.."
 
 export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode-beta.app/Contents/Developer}"
 CONFIG="${1:-debug}"   # debug | release
+ENTITLEMENTS="scripts/Mnemo.entitlements"
+SIGN_IDENTITY="$(/bin/bash scripts/resolve-signing-identity.sh "$CONFIG")"
+
+if [ "$SIGN_IDENTITY" = "-" ]; then
+  echo "== explicitly using ad-hoc debug signing; TCC grants are build-specific =="
+else
+  echo "== signing with stable identity $SIGN_IDENTITY =="
+fi
 
 echo "== building MnemoApp ($CONFIG) with $DEVELOPER_DIR =="
 swift build --product MnemoApp -c "$CONFIG"
@@ -61,25 +69,21 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 </plist>
 PLIST
 
-SIGN_IDENTITY="${MNEMO_CODESIGN_IDENTITY:-}"
-if [ -z "$SIGN_IDENTITY" ]; then
-  SIGN_IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null \
-    | awk '/Apple Development/ { print $2; exit }')"
-fi
-if [ -z "$SIGN_IDENTITY" ]; then
-  SIGN_IDENTITY="-"
-  echo "== no stable signing identity found; falling back to ad-hoc signing =="
-else
-  echo "== signing with stable identity $SIGN_IDENTITY =="
-fi
-
-# A stable certificate gives TCC a stable designated requirement. Ad-hoc signing
-# keys grants to the binary CDHash, which changes on every rebuild and makes
-# macOS ask for Microphone and Speech Recognition again.
+# A certificate-backed designated requirement keeps TCC identity stable across
+# rebuilds. Hardened Runtime adds production protections; audio input is the
+# only restricted runtime resource Mnemo needs.
 for bundle in "$APP"/Contents/Resources/Mnemo_*.bundle; do
   codesign --force --sign "$SIGN_IDENTITY" --timestamp=none "$bundle"
 done
-codesign --force --sign "$SIGN_IDENTITY" --timestamp=none "$APP"
+codesign --force --sign "$SIGN_IDENTITY" --timestamp=none \
+  --options runtime --entitlements "$ENTITLEMENTS" "$APP"
+codesign --verify --deep --strict "$APP"
+
+SIGNATURE_DETAILS="$(codesign -dv --verbose=4 "$APP" 2>&1)"
+if [ "$CONFIG" = "release" ] && ! grep -q '^Authority=' <<<"$SIGNATURE_DETAILS"; then
+  echo "error: release package does not have a certificate-backed signature" >&2
+  exit 1
+fi
 
 echo "== done: $APP =="
-codesign -dv "$APP" 2>&1 | grep -E 'Identifier|Signature' || true
+grep -E 'Identifier|Signature' <<<"$SIGNATURE_DETAILS" || true
