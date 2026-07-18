@@ -3,6 +3,7 @@ import Foundation
 import MnemoCore
 import MnemoOrchestrator
 import MnemoDevServer
+import MnemoSupervisor
 
 /// Wires the loopback developer observatory to the live app. OFF by default;
 /// enabled only via `[devtools] enabled = true` in mnemo.toml or the
@@ -33,7 +34,7 @@ final class DevTools {
         // the exact pipeline the app runs. Captured on the main actor.
         let askHandler: @MainActor @Sendable (String) -> Void = { [weak controller] q in
             guard let c = controller else { return }
-            c.summon()
+            c.summon(origin: .hotkey)
             c.vm.state.query = q
             c.vm.beginSubmit()
         }
@@ -90,11 +91,16 @@ final class DevToolsDataSource: DashboardDataSource, @unchecked Sendable {
         async let engineUp = Self.isUp(config.engine.baseURL)
         let smfsMount = (config.smfs.mountPoint as NSString).expandingTildeInPath
         let smfsMounted = FileManager.default.fileExists(atPath: smfsMount)
+        let persistenceFailure = EnginePersistenceHealth.failureReason(
+            at: NSHomeDirectory() + "/Library/Logs/Mnemo/engine.log"
+        )
         let (o, e) = (await ollamaUp, await engineUp)
         return StackHealth(
             ollama: ProcessState(name: "ollama", isRunning: o, boundAddress: o ? Self.hostPort(config.model.runtimeBaseURL) : nil),
             engine: ProcessState(name: "engine", isRunning: e, boundAddress: e ? Self.hostPort(config.engine.baseURL) : nil),
-            smfs: ProcessState(name: "smfs", isRunning: smfsMounted, boundAddress: smfsMounted ? Self.hostPort(config.smfs.backingStore) : nil))
+            smfs: ProcessState(name: "smfs", isRunning: smfsMounted, boundAddress: smfsMounted ? Self.hostPort(config.smfs.backingStore) : nil),
+            additionalUnhealthyReasons: persistenceFailure.map { [$0] } ?? []
+        )
     }
 
     private static func isUp(_ url: URL) async -> Bool {

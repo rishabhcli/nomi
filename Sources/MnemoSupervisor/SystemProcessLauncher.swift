@@ -73,13 +73,25 @@ public struct SystemProcessLauncher: ProcessLauncher {
         case .engine:
             let port = config.engine.baseURL.port ?? 6767
             guard let bin = engineBinaryPath() else { throw LaunchError.binaryNotFound("supermemory-server") }
+            let binaryWasHardened = try EngineBinaryHardener.harden(at: bin)
             switch try listenerDisposition(for: .engine, on: port, expectedExecutable: bin) {
             case .vacant:
                 try launchEngine(bin)
-            case .reusable:
-                return
+            case let .reusable(listener):
+                guard binaryWasHardened else { return }
+                await terminateManagedPIDs(
+                    [listener.pid],
+                    on: port,
+                    gracePeriodMs: EngineLaunchPolicy.engineShutdownGracePeriodMs
+                )
+                try requireVacantPort(port, process: .engine)
+                try launchEngine(bin)
             case let .replaceableManaged(pids):
-                await terminateManagedPIDs(pids, on: port)
+                await terminateManagedPIDs(
+                    pids,
+                    on: port,
+                    gracePeriodMs: EngineLaunchPolicy.engineShutdownGracePeriodMs
+                )
                 try requireVacantPort(port, process: .engine)
                 try launchEngine(bin)
             case let .occupied(sockets):
@@ -155,7 +167,8 @@ public struct SystemProcessLauncher: ProcessLauncher {
                 await clearManagedListeners(
                     .engine,
                     on: config.engine.baseURL.port ?? 6767,
-                    expectedExecutable: bin
+                    expectedExecutable: bin,
+                    gracePeriodMs: EngineLaunchPolicy.engineShutdownGracePeriodMs
                 )
             }
         case .smfs:
@@ -230,6 +243,11 @@ public struct SystemProcessLauncher: ProcessLauncher {
             }
             return sockets[0].address
         }
+    }
+
+    public func additionalUnhealthyReasons() async -> [String] {
+        let reason = EnginePersistenceHealth.failureReason(at: logPath("engine"))
+        return reason.map { [$0] } ?? []
     }
 
     /// Returns socket-table observations for the managed roots and their child

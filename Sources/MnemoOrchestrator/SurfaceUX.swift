@@ -341,6 +341,24 @@ public enum SurfaceUX {
             if highContrast { return primary ? 1.0 : 0.92 }
             return primary ? Typography.primaryTextOpacity : Typography.secondaryTextOpacity
         }
+
+        /// Preserve each surface's tuned normal opacity, but raise it to the
+        /// shared contrast floor when either accessibility preference requests
+        /// stronger non-color differentiation.
+        public static func adaptiveTextOpacity(normal: Double,
+                                               primary: Bool = false,
+                                               highContrast: Bool,
+                                               differentiateWithoutColor: Bool) -> Double {
+            guard highContrast || differentiateWithoutColor else { return normal }
+            return max(normal, textOpacity(primary: primary, highContrast: true))
+        }
+
+        public static func adaptiveDividerOpacity(normal: Double,
+                                                  highContrast: Bool,
+                                                  differentiateWithoutColor: Bool) -> Double {
+            guard highContrast || differentiateWithoutColor else { return normal }
+            return max(normal, borderStrokeOpacity)
+        }
     }
 
     // MARK: - Prompt registry (maps E-NNNN → seed for tests)

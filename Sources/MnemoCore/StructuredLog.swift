@@ -77,17 +77,30 @@ public enum MnemoLogPaths {
     public static var engineLog: String { logsDir + "/engine.log" }
 
     public static func ensureLogsDir() {
-        try? FileManager.default.createDirectory(atPath: logsDir, withIntermediateDirectories: true)
+        ensureLogsDir(at: logsDir)
+    }
+
+    static func ensureLogsDir(at path: String) {
+        let permissions: [FileAttributeKey: Any] = [.posixPermissions: 0o700]
+        try? FileManager.default.createDirectory(
+            atPath: path,
+            withIntermediateDirectories: true,
+            attributes: permissions
+        )
+        try? FileManager.default.setAttributes(permissions, ofItemAtPath: path)
     }
 
     public static func appendLine(_ line: String, to path: String) {
-        ensureLogsDir()
+        let parentDirectory = URL(fileURLWithPath: path).deletingLastPathComponent().path
+        ensureLogsDir(at: parentDirectory)
+        let permissions: [FileAttributeKey: Any] = [.posixPermissions: 0o600]
         if !FileManager.default.fileExists(atPath: path) {
-            FileManager.default.createFile(atPath: path, contents: nil)
+            FileManager.default.createFile(atPath: path, contents: nil, attributes: permissions)
         }
+        try? FileManager.default.setAttributes(permissions, ofItemAtPath: path)
         guard let h = FileHandle(forWritingAtPath: path) else { return }
         defer { try? h.close() }
-        try? h.seekToEnd()
+        _ = try? h.seekToEnd()
         if let d = line.data(using: .utf8) { try? h.write(contentsOf: d) }
     }
 

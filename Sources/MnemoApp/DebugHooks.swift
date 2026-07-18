@@ -20,7 +20,7 @@ final class DebugHooks {
         self.controller = controller
         let center = DistributedNotificationCenter.default()
         let actions: [(String, @MainActor () -> Void)] = [
-            ("ai.mnemo.debug.summon", { [weak self] in self?.controller.summon() }),
+            ("ai.mnemo.debug.summon", { [weak self] in self?.controller.summon(origin: .hotkey) }),
             ("ai.mnemo.debug.dismiss", { [weak self] in self?.controller.dismiss() }),
             ("ai.mnemo.debug.typing", { [weak self] in self?.showTyping() }),
             ("ai.mnemo.debug.searching", { [weak self] in self?.showSearching() }),
@@ -46,14 +46,14 @@ final class DebugHooks {
     }
 
     private func showSearching() {
-        controller.summon()
+        controller.summon(origin: .hotkey)
         controller.vm.state.phase = .searching
         controller.vm.state.status = "Searching your memory…"
     }
 
     /// Typing state: shows the mic → send morph (reference IMG_1150).
     private func showTyping() {
-        controller.summon()
+        controller.summon(origin: .hotkey)
         controller.vm.state.query = "Hello"
     }
 
@@ -61,7 +61,7 @@ final class DebugHooks {
     /// crash-fix regression check. Summons, then starts the mic; logs the
     /// listening/problem state so a headless run can assert no force-quit.
     private func startDictation() {
-        controller.summon()
+        controller.summon(origin: .hotkey)
         controller.dictation.start()
         let d = controller.dictation
         try? "dictate-started listening=\(d.isListening) problem=\(d.problem ?? "nil")\n"
@@ -72,7 +72,7 @@ final class DebugHooks {
     /// listening UI can be verified headlessly where speech permission isn't
     /// granted. Not a real capture — purely the drop geometry + orb shader.
     private func fakeListen() {
-        controller.summon()
+        controller.summon(origin: .hotkey)
         controller.dictation.amplitude = 0.55
         controller.dictation.isListening = true
     }
@@ -83,7 +83,7 @@ final class DebugHooks {
             try? "ask-missing-query\n".appendToFile(atPath: "/tmp/mnemo-geometry.log")
             return
         }
-        controller.summon()
+        controller.summon(origin: .hotkey)
         controller.vm.state.query = q
         controller.vm.beginSubmit()
         try? "ask-started query=\(q)\n".appendToFile(atPath: "/tmp/mnemo-geometry.log")
@@ -94,7 +94,7 @@ final class DebugHooks {
     private func cycleOpenClose() {
         Task { @MainActor in
             for i in 0..<10 {
-                controller.summon()
+                controller.summon(origin: .hotkey)
                 try? await Task.sleep(for: .milliseconds(650))
                 controller.dismiss()
                 try? await Task.sleep(for: .milliseconds(500))
@@ -108,7 +108,7 @@ final class DebugHooks {
     /// Deterministic answering state — renders the reference layout offline
     /// (answer text · one quiet chip · thumbs).
     private func showDemoAnswer() {
-        controller.summon()
+        controller.summon(origin: .hotkey)
         controller.vm.state = NotchState(
             phase: .answering, query: "Why did the scarecrow win an award?",
             answer: "Why did the scarecrow win an award? Because he was outstanding in his field!",

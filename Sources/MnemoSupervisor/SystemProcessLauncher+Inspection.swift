@@ -22,8 +22,41 @@ extension SystemProcessLauncher {
 
     func logPath(_ name: String) -> String {
         let dir = NSHomeDirectory() + "/Library/Logs/Mnemo"
-        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        try? secureLogDirectory(at: dir)
         return "\(dir)/\(name).log"
+    }
+
+    private func secureLogDirectory(at path: String) throws {
+        try FileManager.default.createDirectory(
+            atPath: path,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: path
+        )
+    }
+
+    private func prepareLog(at path: String) throws -> FileHandle {
+        let directory = URL(fileURLWithPath: path).deletingLastPathComponent().path
+        try secureLogDirectory(at: directory)
+        if !FileManager.default.fileExists(atPath: path) {
+            guard FileManager.default.createFile(
+                atPath: path,
+                contents: nil,
+                attributes: [.posixPermissions: 0o600]
+            ) else {
+                throw CocoaError(.fileWriteUnknown)
+            }
+        }
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: path
+        )
+        let handle = try FileHandle(forWritingTo: URL(fileURLWithPath: path))
+        try handle.truncate(atOffset: 0)
+        return handle
     }
 
     func listeners(on port: Int) -> [ListeningSocket] {
@@ -164,7 +197,8 @@ extension SystemProcessLauncher {
         on port: Int,
         expectedExecutable: String,
         requiredArguments: [String]? = nil,
-        requireSandboxMarker: Bool? = nil
+        requireSandboxMarker: Bool? = nil,
+        gracePeriodMs: Int = 3_000
     ) async {
         let sockets = listeners(on: port)
         var identities: [Int: ProcessIdentity] = [:]
@@ -178,18 +212,33 @@ extension SystemProcessLauncher {
             requiredArguments: requiredArguments ?? expectedArguments(for: process),
             requireSandboxMarker: requireSandboxMarker ?? (process != .smfs)
         )
-        await terminateManagedPIDs(managedPIDs, on: port)
+        await terminateManagedPIDs(managedPIDs, on: port, gracePeriodMs: gracePeriodMs)
     }
 
-    func terminateManagedPIDs(_ pids: Set<Int>, on port: Int) async {
-        for pid in pids { _ = try? run("/bin/kill", ["-TERM", String(pid)]) }
-        for _ in 0..<30 {
-            if listeners(on: port).allSatisfy({ !pids.contains($0.pid) }) { return }
+    func terminateManagedPIDs(
+        _ pids: Set<Int>,
+        on _: Int,
+        gracePeriodMs: Int = 3_000
+    ) async {
+        for pid in pids { _ = Darwin.kill(pid_t(pid), SIGTERM) }
+        let attempts = max(1, gracePeriodMs / 100)
+        for _ in 0..<attempts {
+            if pids.allSatisfy({ !processIsRunning($0) }) { return }
             try? await Task.sleep(for: .milliseconds(100))
         }
-        for pid in Set(listeners(on: port).map(\.pid)).intersection(pids) {
-            _ = try? run("/bin/kill", ["-KILL", String(pid)])
+        for pid in pids where processIsRunning(pid) {
+            _ = Darwin.kill(pid_t(pid), SIGKILL)
         }
+        for _ in 0..<30 {
+            if pids.allSatisfy({ !processIsRunning($0) }) { return }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+    }
+
+    private func processIsRunning(_ pid: Int) -> Bool {
+        errno = 0
+        if Darwin.kill(pid_t(pid), 0) == 0 { return true }
+        return errno == EPERM
     }
 
     func waitForPortToClear(_ port: Int) async {
@@ -211,7 +260,8 @@ extension SystemProcessLauncher {
             "/usr/bin/sandbox-exec",
             ["-p", EngineLaunchPolicy.sandboxProfile, binary],
             logPath: logPath("engine"),
-            environment: EngineLaunchPolicy.environment(config: config)
+            environment: EngineLaunchPolicy.environment(config: config),
+            redactSensitiveOutput: true
         )
     }
 
@@ -255,16 +305,41 @@ extension SystemProcessLauncher {
         _ path: String,
         _ args: [String],
         logPath: String,
-        environment: [String: String]? = nil
+        environment: [String: String]? = nil,
+        redactSensitiveOutput: Bool = false
     ) throws {
-        FileManager.default.createFile(atPath: logPath, contents: nil)
-        let log = FileHandle(forWritingAtPath: logPath)
+        let log = try prepareLog(at: logPath)
         let p = Process()
         p.executableURL = URL(fileURLWithPath: path)
         p.arguments = args
         if let environment { p.environment = environment }
-        if let log { p.standardOutput = log; p.standardError = log }
-        try p.run()
+        guard redactSensitiveOutput else {
+            p.standardOutput = log
+            p.standardError = log
+            try p.run()
+            return
+        }
+
+        let output = Pipe()
+        let redactor = Process()
+        redactor.executableURL = URL(fileURLWithPath: "/usr/bin/sed")
+        redactor.arguments = [
+            "-l", "-E",
+            "s/sm_[[:alnum:]_-]{20,}/[REDACTED]/g",
+        ]
+        redactor.standardInput = output
+        redactor.standardOutput = log
+        redactor.standardError = log
+        p.standardOutput = output
+        p.standardError = output
+
+        try redactor.run()
+        do {
+            try p.run()
+        } catch {
+            redactor.terminate()
+            throw error
+        }
     }
 
     public func capture(_ path: String, _ args: [String]) throws -> String {

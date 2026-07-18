@@ -50,6 +50,53 @@ final class NotchPanelInteractionPolicyTests: XCTestCase {
     }
 }
 
+final class NotchSummonDisplayPolicyTests: XCTestCase {
+    func testPointerSummonPrefersPointerDisplay() {
+        XCTAssertEqual(NotchSummonDisplayPolicy.preferredDisplay(
+            origin: .pointer,
+            pointerDisplay: "pointer",
+            keyWindowDisplay: "key-window",
+            mainDisplay: "main",
+            fallbackDisplay: "fallback"
+        ), "pointer")
+    }
+
+    func testHotkeySummonPrefersKeyWindowThenMainDisplay() {
+        XCTAssertEqual(NotchSummonDisplayPolicy.preferredDisplay(
+            origin: .hotkey,
+            pointerDisplay: "pointer",
+            keyWindowDisplay: "key-window",
+            mainDisplay: "main",
+            fallbackDisplay: "fallback"
+        ), "key-window")
+
+        XCTAssertEqual(NotchSummonDisplayPolicy.preferredDisplay(
+            origin: .hotkey,
+            pointerDisplay: "pointer",
+            keyWindowDisplay: nil,
+            mainDisplay: "main",
+            fallbackDisplay: "fallback"
+        ), "main", "hotkey summon must not jump to a remote pointer display")
+    }
+
+    func testSummonFallsBackWhenPreferredDisplaysAreUnavailable() {
+        XCTAssertEqual(NotchSummonDisplayPolicy.preferredDisplay(
+            origin: .pointer,
+            pointerDisplay: nil,
+            keyWindowDisplay: nil,
+            mainDisplay: nil,
+            fallbackDisplay: "fallback"
+        ), "fallback")
+        XCTAssertEqual(NotchSummonDisplayPolicy.preferredDisplay(
+            origin: .hotkey,
+            pointerDisplay: "pointer",
+            keyWindowDisplay: nil,
+            mainDisplay: nil,
+            fallbackDisplay: "fallback"
+        ), "fallback")
+    }
+}
+
 final class NotchControllerWiringTests: XCTestCase {
     private func appSource(_ name: String) throws -> String {
         try String(contentsOfFile: "Sources/MnemoApp/\(name)", encoding: .utf8)
@@ -77,7 +124,28 @@ final class NotchControllerWiringTests: XCTestCase {
         XCTAssertTrue(hover.contains("addGlobalMonitorForEvents(matching: .mouseMoved)"))
         XCTAssertTrue(hover.contains("handleMouseMove(at: event.locationInWindow)"))
         XCTAssertTrue(main.contains("onMove: { [weak self] location in"))
-        XCTAssertTrue(main.contains("onArm: { [weak self] in self?.controller.summon() }"))
+        XCTAssertTrue(main.contains("onArm: { [weak self] in self?.controller.summon(origin: .pointer) }"))
+    }
+
+    func testHoverAndHotkeyUseDistinctSummonOrigins() throws {
+        let main = try appSource("main.swift")
+        let controller = try appSource("NotchController.swift")
+
+        XCTAssertTrue(main.contains("controller.summon(origin: .pointer)"))
+        XCTAssertTrue(main.contains("c.summon(origin: .hotkey)"))
+        XCTAssertTrue(controller.contains("func summon(origin: NotchSummonOrigin)"))
+        XCTAssertTrue(controller.contains("NotchSummonDisplayPolicy.preferredDisplay"))
+    }
+
+    func testResignKeyDelegatesToOnboardingAwareControllerPolicy() throws {
+        let main = try appSource("main.swift")
+        let controller = try appSource("NotchController.swift")
+
+        XCTAssertTrue(main.contains("handlePanelDidResignKey()"))
+        XCTAssertTrue(controller.contains("func handlePanelDidResignKey()"))
+        XCTAssertTrue(controller.contains("showsOnboarding:"))
+        XCTAssertTrue(controller.contains("vm.showsPermissionOnboarding"))
+        XCTAssertTrue(controller.contains("vm.showsStarterProfile"))
     }
 
     func testDisplayParameterChangesReanchorTheController() throws {

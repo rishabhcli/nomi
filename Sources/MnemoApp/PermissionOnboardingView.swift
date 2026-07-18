@@ -1,3 +1,4 @@
+import AppKit
 import MnemoOrchestrator
 import SwiftUI
 
@@ -22,11 +23,27 @@ enum PermissionOnboardingScreenState: Equatable {
 }
 
 struct PermissionOnboardingView: View {
+    private enum FocusTarget: Hashable {
+        case primaryAction
+    }
+
+    private enum AnnouncementState: Equatable {
+        case requesting
+        case ready(canContinue: Bool)
+    }
+
     @ObservedObject var vm: NotchViewModel
+    @FocusState private var focusedControl: FocusTarget?
+    @State private var lastAnnouncement: AnnouncementState?
+    @State private var panelIsKey = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiateWithoutColor
+    @Environment(\.colorSchemeContrast) private var contrast
 
     private var snapshot: PermissionSnapshot? { vm.permissionOnboardingState.snapshot }
     private var isRequesting: Bool { vm.permissionOnboardingState.isRequesting }
+    private var highContrast: Bool { contrast == .increased }
+    private var enhancedContrast: Bool { highContrast || differentiateWithoutColor }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 15) {
@@ -36,7 +53,7 @@ struct PermissionOnboardingView: View {
 
             Text("Approve voice access once. Protected files is optional and enables local Messages indexing.")
                 .font(.system(size: 13))
-                .foregroundStyle(.white.opacity(0.7))
+                .foregroundStyle(.white.opacity(adaptiveTextOpacity(0.7)))
                 .fixedSize(horizontal: false, vertical: true)
 
             if let snapshot {
@@ -48,7 +65,7 @@ struct PermissionOnboardingView: View {
                         kind: .speechRecognition,
                         optional: false
                     )
-                    Divider().overlay(.white.opacity(0.1))
+                    Divider().overlay(.white.opacity(adaptiveDividerOpacity(0.1)))
                     permissionRow(
                         "Microphone",
                         symbol: "mic.fill",
@@ -56,7 +73,7 @@ struct PermissionOnboardingView: View {
                         kind: .microphone,
                         optional: false
                     )
-                    Divider().overlay(.white.opacity(0.1))
+                    Divider().overlay(.white.opacity(adaptiveDividerOpacity(0.1)))
                     permissionRow(
                         "Protected files",
                         symbol: "externaldrive.fill.badge.checkmark",
@@ -80,6 +97,8 @@ struct PermissionOnboardingView: View {
                         Label("Continue", systemImage: "arrow.right")
                     }
                     .buttonStyle(.glassProminent)
+                    .focused($focusedControl, equals: .primaryAction)
+                    .keyboardShortcut(.defaultAction)
                 } else {
                     Button {
                         vm.requestVoicePermissions()
@@ -87,6 +106,8 @@ struct PermissionOnboardingView: View {
                         Label("Allow voice", systemImage: "mic.badge.plus")
                     }
                     .buttonStyle(.glassProminent)
+                    .focused($focusedControl, equals: .primaryAction)
+                    .keyboardShortcut(.defaultAction)
                 }
             }
         }
@@ -99,11 +120,72 @@ struct PermissionOnboardingView: View {
             Motion.adaptive(Motion.grow, reduceMotion: reduceMotion),
             value: vm.permissionOnboardingState
         )
+        .task(id: vm.permissionOnboardingState) {
+            await handleStateChange(vm.permissionOnboardingState)
+        }
+        .task(id: panelIsKey) {
+            guard panelIsKey else {
+                focusedControl = nil
+                return
+            }
+            await handleStateChange(vm.permissionOnboardingState)
+        }
+        .background {
+            OnboardingKeyWindowObserver { panelIsKey = $0 }
+        }
         .overlay(alignment: .bottom) {
             HomeIndicator().frame(height: Surface.trayHandle)
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Mnemo permissions")
+    }
+
+    @MainActor
+    private func handleStateChange(_ state: PermissionOnboardingScreenState) async {
+        if state.isRequesting || state == .hidden {
+            announce(state)
+        }
+        await restoreFocus(for: state)
+        guard panelIsKey, vm.permissionOnboardingState == state else { return }
+        announce(state)
+    }
+
+    @MainActor
+    private func restoreFocus(for state: PermissionOnboardingScreenState) async {
+        focusedControl = nil
+        await Task.yield()
+        guard !Task.isCancelled, panelIsKey,
+              vm.permissionOnboardingState == state else { return }
+
+        if case .ready = state {
+            focusedControl = .primaryAction
+        }
+    }
+
+    private func announce(_ state: PermissionOnboardingScreenState) {
+        let announcement: AnnouncementState?
+        switch state {
+        case .hidden:
+            announcement = nil
+        case .requesting:
+            announcement = .requesting
+        case .ready(let snapshot):
+            announcement = .ready(canContinue: snapshot.voiceIsResolved)
+        }
+        guard let announcement else {
+            lastAnnouncement = nil
+            return
+        }
+        guard announcement != lastAnnouncement else { return }
+        lastAnnouncement = announcement
+
+        switch announcement {
+        case .requesting:
+            AccessibilityAnnouncer.post("Requesting voice permissions.")
+        case .ready(let canContinue):
+            let nextStep = canContinue ? " Continue." : " Allow voice to continue."
+            AccessibilityAnnouncer.post("Permission setup ready.\(nextStep)")
+        }
     }
 
     private func permissionRow(
@@ -117,7 +199,7 @@ struct PermissionOnboardingView: View {
             Image(systemName: symbol)
                 .font(.system(size: 14, weight: .semibold))
                 .frame(width: 19)
-                .foregroundStyle(.white.opacity(0.82))
+                .foregroundStyle(.white.opacity(adaptiveTextOpacity(0.82)))
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.system(size: 13, weight: .medium))
@@ -125,19 +207,20 @@ struct PermissionOnboardingView: View {
                 if optional, !status.isAuthorized {
                     Text("Optional")
                         .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.48))
+                        .foregroundStyle(.white.opacity(adaptiveTextOpacity(0.48)))
                 }
             }
             Spacer()
             Text(statusLabel(status))
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(status.isAuthorized ? Color.green : Color.white.opacity(0.58))
+                .foregroundStyle(statusColor(status))
             if status == .denied || status == .restricted || (optional && !status.isAuthorized) {
                 Button {
                     vm.openPermissionSettings(kind)
                 } label: {
                     Image(systemName: "gearshape.fill")
                         .frame(width: 24, height: 24)
+                        .modifier(OnboardingContrastForeground(enabled: enhancedContrast))
                 }
                 .buttonStyle(.glass)
                 .help("Open Privacy & Security")
@@ -155,5 +238,106 @@ struct PermissionOnboardingView: View {
         case .restricted: "Restricted"
         case .unavailable: "Unavailable"
         }
+    }
+
+    private func statusColor(_ status: PermissionGrantStatus) -> Color {
+        if status.isAuthorized {
+            return enhancedContrast ? Color.white : Color.green
+        }
+        return .white.opacity(adaptiveTextOpacity(0.58))
+    }
+
+    private func adaptiveTextOpacity(_ normal: Double, primary: Bool = false) -> Double {
+        SurfaceUX.IncreaseContrast.adaptiveTextOpacity(
+            normal: normal,
+            primary: primary,
+            highContrast: highContrast,
+            differentiateWithoutColor: differentiateWithoutColor
+        )
+    }
+
+    private func adaptiveDividerOpacity(_ normal: Double) -> Double {
+        SurfaceUX.IncreaseContrast.adaptiveDividerOpacity(
+            normal: normal,
+            highContrast: highContrast,
+            differentiateWithoutColor: differentiateWithoutColor
+        )
+    }
+}
+
+private struct OnboardingContrastForeground: ViewModifier {
+    let enabled: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if enabled { content.foregroundStyle(.white) }
+        else { content }
+    }
+}
+
+/// Reports key status for the exact NSWindow containing the onboarding view,
+/// so focus can be restored after a system permission window returns control.
+struct OnboardingKeyWindowObserver: NSViewRepresentable {
+    let onKeyStatusChange: (Bool) -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let view = OnboardingKeyWindowObserverView()
+        view.onKeyStatusChange = onKeyStatusChange
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        (nsView as? OnboardingKeyWindowObserverView)?.onKeyStatusChange = onKeyStatusChange
+    }
+}
+
+@MainActor
+private final class OnboardingKeyWindowObserverView: NSView {
+    var onKeyStatusChange: (Bool) -> Void = { _ in }
+    private weak var observedWindow: NSWindow?
+    private var lastReportedStatus: Bool?
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if let observedWindow {
+            NotificationCenter.default.removeObserver(
+                self, name: NSWindow.didBecomeKeyNotification, object: observedWindow)
+            NotificationCenter.default.removeObserver(
+                self, name: NSWindow.didResignKeyNotification, object: observedWindow)
+        }
+        observedWindow = nil
+        lastReportedStatus = nil
+        super.viewWillMove(toWindow: newWindow)
+        guard let newWindow else { return }
+        observedWindow = newWindow
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(windowDidBecomeKey),
+            name: NSWindow.didBecomeKeyNotification,
+            object: newWindow
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(windowDidResignKey),
+            name: NSWindow.didResignKeyNotification,
+            object: newWindow
+        )
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        report(window?.isKeyWindow == true)
+    }
+
+    @objc private func windowDidBecomeKey() { report(true) }
+    @objc private func windowDidResignKey() { report(false) }
+
+    private func report(_ isKey: Bool) {
+        guard lastReportedStatus != isKey else { return }
+        lastReportedStatus = isKey
+        onKeyStatusChange(isKey)
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
     }
 }

@@ -43,6 +43,7 @@ public enum SMFSMountOwnership: Equatable, Sendable {
 public enum EngineLaunchPolicy {
     public static let markerKey = "MNEMO_STACK_SANDBOX_POLICY"
     public static let markerValue = "loopback-only-v1"
+    public static let engineShutdownGracePeriodMs = 60_000
 
     public static let sandboxProfile = """
     (version 1)
@@ -85,6 +86,11 @@ public enum EngineLaunchPolicy {
         result["SUPERMEMORY_DATA_DIR"] = homeDirectory + "/.supermemory/data"
         result["SUPERMEMORY_DISABLE_TELEMETRY"] = "1"
         result["SUPERMEMORY_EMBEDDING_PROVIDER"] = "local"
+        result["SUPERMEMORY_EMBEDDING_RAM_LIMIT"] = "512mb"
+        result["SUPERMEMORY_INGEST_CONCURRENCY"] = "1"
+        result["SUPERMEMORY_LOCAL_EMBEDDING_POOL_SIZE"] = "1"
+        result["SUPERMEMORY_LOCAL_EMBEDDING_IDLE_TIMEOUT_MS"] = "30000"
+        result["BUN_GARBAGE_COLLECTOR_LEVEL"] = "1"
         result["SUPERMEMORY_NO_UPDATE_CHECK"] = "1"
         result["SUPERMEMORY_NO_OPEN"] = "1"
         result["SUPERMEMORY_NO_STARTUP_ANIMATION"] = "1"

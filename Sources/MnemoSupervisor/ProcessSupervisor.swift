@@ -9,6 +9,11 @@ public protocol ProcessLauncher: Sendable {
     func launch(_ p: ManagedProcess) async throws
     func terminate(_ p: ManagedProcess) async
     func boundAddress(_ p: ManagedProcess) async -> String?
+    func additionalUnhealthyReasons() async -> [String]
+}
+
+public extension ProcessLauncher {
+    func additionalUnhealthyReasons() async -> [String] { [] }
 }
 
 public enum SupervisorError: Error, Equatable { case failedToStart(ManagedProcess) }
@@ -74,6 +79,11 @@ public actor ProcessSupervisor {
     }
 
     public func health() async -> StackHealth {
-        StackHealth(ollama: await state(.ollama), engine: await state(.engine), smfs: await state(.smfs))
+        StackHealth(
+            ollama: await state(.ollama),
+            engine: await state(.engine),
+            smfs: await state(.smfs),
+            additionalUnhealthyReasons: await launcher.additionalUnhealthyReasons()
+        )
     }
 }

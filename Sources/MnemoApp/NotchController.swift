@@ -272,21 +272,34 @@ final class NotchController {
         ))
     }
 
-    func summon() {
+    func summon(origin: NotchSummonOrigin) {
         // Only from a truly idle surface: never while a query is still
         // streaming (phase can be .answering mid-stream), or a hover-out/in
         // spawns a duplicate session on top of the in-flight one.
         guard vm.state.phase == .idle, !vm.isQuerying else { return }
-        reanchorToPointerDisplay()
+        let screens = NSScreen.screens
+        if let destination = NotchSummonDisplayPolicy.preferredDisplay(
+            origin: origin,
+            pointerDisplay: screenContainingPointer(in: screens),
+            keyWindowDisplay: NSApp.keyWindow?.screen,
+            mainDisplay: NSScreen.main,
+            fallbackDisplay: screens.first
+        ) {
+            reanchor(to: destination)
+        }
         vm.summon()
         refreshPanelInteraction()
         panel.makeKeyAndOrderFront(nil)   // caret live immediately
     }
 
-    /// Hover and hotkey summons follow the pointer across displays.
-    private func reanchorToPointerDisplay() {
-        guard let screen = screenContainingPointer(in: NSScreen.screens) ?? NSScreen.main else { return }
-        reanchor(to: screen)
+    func handlePanelDidResignKey() {
+        guard NotchHover.shouldCollapseOnResignKey(
+            phase: vm.state.phase,
+            isListening: dictation.isListening,
+            isQuerying: vm.isQuerying,
+            showsOnboarding: vm.showsPermissionOnboarding || vm.showsStarterProfile
+        ) else { return }
+        dismiss()
     }
 
     /// Recompute the anchor after a display is added, removed, rearranged, or

@@ -98,12 +98,39 @@ public enum NotchHover {
     }
 
     /// Losing key status is an explicit click-away only after interactive work
-    /// has stopped. The first streamed token changes the phase to `.answering`,
-    /// so phase alone cannot distinguish a completed answer from a live one.
+    /// and onboarding have stopped. The first streamed token changes the phase
+    /// to `.answering`, so phase alone cannot distinguish completion either.
     public static func shouldCollapseOnResignKey(phase: NotchPhase,
                                                   isListening: Bool,
-                                                  isQuerying: Bool) -> Bool {
+                                                  isQuerying: Bool,
+                                                  showsOnboarding: Bool) -> Bool {
         phase != .idle && phase != .searching && !isListening && !isQuerying
+            && !showsOnboarding
+    }
+}
+
+public enum NotchSummonOrigin: Equatable, Sendable {
+    case pointer
+    case hotkey
+}
+
+/// Selects the display without coupling the interaction policy to AppKit.
+/// Pointer gestures follow the pointer; keyboard summons follow keyboard focus
+/// and then the main display, even when the pointer is on another screen.
+public enum NotchSummonDisplayPolicy {
+    public static func preferredDisplay<Display>(
+        origin: NotchSummonOrigin,
+        pointerDisplay: Display?,
+        keyWindowDisplay: Display?,
+        mainDisplay: Display?,
+        fallbackDisplay: Display?
+    ) -> Display? {
+        switch origin {
+        case .pointer:
+            pointerDisplay ?? mainDisplay ?? fallbackDisplay
+        case .hotkey:
+            keyWindowDisplay ?? mainDisplay ?? fallbackDisplay
+        }
     }
 }
 

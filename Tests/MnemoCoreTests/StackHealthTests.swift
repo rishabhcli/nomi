@@ -25,4 +25,17 @@ final class StackHealthTests: XCTestCase {
             "smfs bound to non-loopback 0.0.0.0:11111"
         ])
     }
+
+    func testAdditionalHealthFailurePreventsGreenStatus() {
+        let ok = ProcessState(name: "x", isRunning: true, boundAddress: "127.0.0.1:1")
+        let h = StackHealth(
+            ollama: ok,
+            engine: ok,
+            smfs: ok,
+            additionalUnhealthyReasons: ["engine persistence snapshot failed"]
+        )
+
+        XCTAssertFalse(h.allHealthyAndLoopback)
+        XCTAssertEqual(h.unhealthyReasons, ["engine persistence snapshot failed"])
+    }
 }

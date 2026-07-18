@@ -64,6 +64,21 @@ actor MissingSMFSMountLauncher: ProcessLauncher {
     }
 }
 
+actor PersistenceFailureLauncher: ProcessLauncher {
+    func launch(_ p: ManagedProcess) async throws {}
+    func terminate(_ p: ManagedProcess) async {}
+    func boundAddress(_ p: ManagedProcess) async -> String? {
+        switch p {
+        case .ollama: "127.0.0.1:11434"
+        case .engine: "127.0.0.1:6767"
+        case .smfs: "127.0.0.1:11111"
+        }
+    }
+    func additionalUnhealthyReasons() async -> [String] {
+        ["engine persistence snapshot failed"]
+    }
+}
+
 final class ProcessSupervisorTests: XCTestCase {
     func testStartsInDependencyOrder() async throws {
         let launcher = FakeLauncher()
@@ -77,6 +92,19 @@ final class ProcessSupervisorTests: XCTestCase {
         try await sup.startAll()
         let h = await sup.health()
         XCTAssertTrue(h.allHealthyAndLoopback)
+    }
+
+    func testPersistenceFailureCannotBeMaskedByHealthyHTTP() async throws {
+        let sup = ProcessSupervisor(
+            config: try MnemoConfig.load(from: supervisorSampleConfig),
+            launcher: PersistenceFailureLauncher(),
+            probe: AlwaysUp()
+        )
+
+        let health = await sup.health()
+
+        XCTAssertFalse(health.allHealthyAndLoopback)
+        XCTAssertEqual(health.unhealthyReasons, ["engine persistence snapshot failed"])
     }
     func testRestartRelaunchesProcess() async throws {
         let launcher = FakeLauncher()

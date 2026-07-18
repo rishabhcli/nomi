@@ -131,24 +131,37 @@ final class HoverGeometryTests: XCTestCase {
         XCTAssertFalse(NotchHover.shouldCollapseOnResignKey(
             phase: .answering,
             isListening: false,
-            isQuerying: true
+            isQuerying: true,
+            showsOnboarding: false
         ), "clicking another app after the first token must not cancel the live query")
 
         XCTAssertFalse(NotchHover.shouldCollapseOnResignKey(
             phase: .searching,
             isListening: false,
-            isQuerying: true
+            isQuerying: true,
+            showsOnboarding: false
         ))
         XCTAssertFalse(NotchHover.shouldCollapseOnResignKey(
             phase: .answering,
             isListening: true,
-            isQuerying: false
+            isQuerying: false,
+            showsOnboarding: false
         ))
         XCTAssertTrue(NotchHover.shouldCollapseOnResignKey(
             phase: .answering,
             isListening: false,
-            isQuerying: false
+            isQuerying: false,
+            showsOnboarding: false
         ), "a completed answer still follows the explicit click-away collapse policy")
+    }
+
+    func testResigningKeyDoesNotCollapsePermissionOrStarterOnboarding() {
+        XCTAssertFalse(NotchHover.shouldCollapseOnResignKey(
+            phase: .input,
+            isListening: false,
+            isQuerying: false,
+            showsOnboarding: true
+        ), "permission UI and starter-profile controls may temporarily move key focus")
     }
 
     func testVoiceTargetMatchesOnlyTheNotchCollar() {

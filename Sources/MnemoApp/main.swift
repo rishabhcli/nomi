@@ -94,27 +94,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onMove: { [weak self] location in
                 self?.controller?.panel.updatePointerLocation(location)
             },
-            onArm: { [weak self] in self?.controller.summon() },
+            onArm: { [weak self] in self?.controller.summon(origin: .pointer) },
             onLeave: { [weak self] in self?.controller.dismiss() },
             leaveRegion: { [weak self] in self?.controller.mouseOutHotRect })
         hover.start()
 
         // Click-outside: the panel resigning key collapses the surface —
-        // unless the user is mid-dictation or an answer is streaming. Disabled
-        // under debug hooks so headless UI tests aren't collapsed when another
-        // app steals key focus.
+        // unless the user is mid-dictation, an answer is streaming, or a system
+        // permission/starter flow temporarily owns focus. Disabled under debug
+        // hooks so headless UI tests aren't collapsed when another app steals
+        // key focus.
         if ProcessInfo.processInfo.environment["MNEMO_DEBUG_HOOKS"] != "1" {
             NotificationCenter.default.addObserver(
                 forName: NSWindow.didResignKeyNotification,
                 object: controller.panel, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated {
-                    guard let self, let c = self.controller,
-                          NotchHover.shouldCollapseOnResignKey(
-                            phase: c.vm.state.phase,
-                            isListening: c.dictation.isListening,
-                            isQuerying: c.vm.isQuerying
-                          ) else { return }
-                    c.dismiss()
+                    self?.controller?.handlePanelDidResignKey()
                 }
             }
         }
@@ -124,7 +119,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let chord = HotkeyChord.parse(config.ui.summonHotkey) {
             hotkey = GlobalHotKey(chord: chord) { [weak self] in
                 guard let self, let c = self.controller else { return }
-                c.vm.state.phase == .idle ? c.summon() : c.dismiss()
+                c.vm.state.phase == .idle ? c.summon(origin: .hotkey) : c.dismiss()
             }
         }
 

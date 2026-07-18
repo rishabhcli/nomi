@@ -67,7 +67,6 @@ struct InputTray: View {
                     .textFieldStyle(.plain)
                     .font(.system(size: 15))
                     .foregroundStyle(.white)
-                    .tint(.white)
                     .focused($focused)
                     .onSubmit { vm.beginSubmit() }
                     .onKeyPress(.upArrow) { vm.recallPrevious(); return .handled }

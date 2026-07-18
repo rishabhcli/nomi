@@ -2,6 +2,31 @@ import XCTest
 @testable import MnemoCore
 
 final class StructuredLogTests: XCTestCase {
+    func testAppendLineRestrictsLogDirectoryAndFilePermissions() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mnemo-structured-log-\(UUID().uuidString)", isDirectory: true)
+        let logsDir = root.appendingPathComponent("Logs", isDirectory: true)
+        let log = logsDir.appendingPathComponent("app.jsonl")
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        try FileManager.default.createDirectory(
+            at: logsDir,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o777]
+        )
+
+        MnemoLogPaths.appendLine("first\n", to: log.path)
+
+        XCTAssertEqual(try posixPermissions(at: logsDir), 0o700)
+        XCTAssertEqual(try posixPermissions(at: log), 0o600)
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o666], ofItemAtPath: log.path)
+        MnemoLogPaths.appendLine("second\n", to: log.path)
+
+        XCTAssertEqual(try posixPermissions(at: log), 0o600)
+        XCTAssertEqual(try String(contentsOf: log, encoding: .utf8), "first\nsecond\n")
+    }
+
     func testQueryLogEntryJSON() throws {
         var e = QueryLogEntry(queryId: "q-1")
         e.routeIntent = "lookup"
@@ -39,5 +64,10 @@ final class StructuredLogTests: XCTestCase {
                     "contextTokenCount", "modelId", "terminalState"] {
             XCTAssertTrue(line.contains(key), "missing \(key)")
         }
+    }
+
+    private func posixPermissions(at url: URL) throws -> Int {
+        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        return try XCTUnwrap(attributes[.posixPermissions] as? NSNumber).intValue
     }
 }

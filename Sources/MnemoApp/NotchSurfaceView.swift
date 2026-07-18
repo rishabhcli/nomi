@@ -73,15 +73,19 @@ struct NotchSurfaceView: View {
                     content
                         .padding(.top, notchSize.height)             // clears the hardware notch
                         .padding(.bottom, showsTray ? Surface.trayHeight : 0)
-                    if showsTray {
-                        InputTray(vm: vm, dictation: dictation, focused: $focused,
-                                  searching: phase == .searching, reduceMotion: reduceMotion)
-                            .frame(height: Surface.trayHeight)
-                            .frame(maxHeight: .infinity, alignment: .bottom)
-                            .transition(.opacity)
-                    }
                     voiceGestureTarget(surfaceWidth: geo.width)
                 }
+            }
+        }
+        // System glass is composited above ordinary siblings even when it is
+        // declared first in a ZStack. Keep the plain field and glyphs in a
+        // root overlay so the tray material cannot wash out or clip them.
+        .overlay(alignment: .bottom) {
+            if showsTray {
+                InputTray(vm: vm, dictation: dictation, focused: $focused,
+                          searching: phase == .searching, reduceMotion: reduceMotion)
+                    .frame(height: Surface.trayHeight)
+                    .transition(.opacity)
             }
         }
         // Liquid Glass responds to the control-active environment by default.

@@ -41,7 +41,9 @@ public final class DevServer: @unchecked Sendable {
         params.allowLocalEndpointReuse = true
         let listener = try NWListener(using: params)
         listener.stateUpdateHandler = { [weak self, weak listener] state in
-            if case .ready = state { self?.queue.async { self?.readyPort = listener?.port?.rawValue } }
+            guard case .ready = state, let server = self else { return }
+            let port = listener?.port?.rawValue
+            server.queue.async { server.readyPort = port }
         }
         listener.newConnectionHandler = { [weak self] conn in self?.accept(conn) }
         listener.start(queue: queue)
@@ -78,7 +80,8 @@ public final class DevServer: @unchecked Sendable {
         heartbeat = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(15))
-                self?.queue.async { self?.writeAllSSE(SSE.comment("hb")) }
+                guard let server = self else { return }
+                server.queue.async { server.writeAllSSE(SSE.comment("hb")) }
             }
         }
     }
@@ -87,7 +90,11 @@ public final class DevServer: @unchecked Sendable {
         let data = Data(text.utf8)
         for (id, conn) in sse {
             conn.send(content: data, completion: .contentProcessed { [weak self] error in
-                if error != nil { self?.queue.async { self?.sse[id] = nil; conn.cancel() } }
+                guard error != nil, let server = self else { return }
+                server.queue.async {
+                    server.sse[id] = nil
+                    conn.cancel()
+                }
             })
         }
     }
@@ -140,7 +147,8 @@ public final class DevServer: @unchecked Sendable {
         conn.stateUpdateHandler = { [weak self] state in
             switch state {
             case .cancelled, .failed:
-                self?.queue.async { self?.sse[ObjectIdentifier(conn)] = nil }
+                guard let server = self else { return }
+                server.queue.async { server.sse[ObjectIdentifier(conn)] = nil }
             default: break
             }
         }

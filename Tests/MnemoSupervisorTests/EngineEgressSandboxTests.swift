@@ -1,8 +1,120 @@
 import XCTest
+import Darwin
 @testable import MnemoCore
 @testable import MnemoSupervisor
 
 final class EngineEgressSandboxTests: XCTestCase {
+    func testEngineShutdownAllowsLargeLocalSnapshotToFlush() {
+        XCTAssertEqual(EngineLaunchPolicy.engineShutdownGracePeriodMs, 60_000)
+    }
+
+    func testTerminationWaitsForOriginalProcessAfterListenerCloses() async throws {
+        let process = Process()
+        let output = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = [
+            "-c",
+            "trap 'sleep 0.25; exit 0' TERM; printf ready; while :; do :; done",
+        ]
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        let ready = output.fileHandleForReading.readData(ofLength: 5)
+        XCTAssertEqual(String(decoding: ready, as: UTF8.self), "ready")
+        let pid = Int(process.processIdentifier)
+        defer {
+            if process.isRunning { _ = Darwin.kill(process.processIdentifier, SIGKILL) }
+        }
+        let launcher = SystemProcessLauncher(
+            config: try MnemoConfig.load(from: supervisorSampleConfig)
+        )
+
+        let startedAt = Date()
+        await launcher.terminateManagedPIDs(
+            [pid],
+            on: 65_534,
+            gracePeriodMs: 1_000
+        )
+
+        XCTAssertGreaterThanOrEqual(Date().timeIntervalSince(startedAt), 0.2)
+        XCTAssertFalse(process.isRunning)
+    }
+
+    func testTerminationForceKillsOriginalProcessThatOutlivesGracePeriod() async throws {
+        let process = Process()
+        let output = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", "trap '' TERM; printf ready; while :; do :; done"]
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        let ready = output.fileHandleForReading.readData(ofLength: 5)
+        XCTAssertEqual(String(decoding: ready, as: UTF8.self), "ready")
+        defer {
+            if process.isRunning { _ = Darwin.kill(process.processIdentifier, SIGKILL) }
+        }
+        let launcher = SystemProcessLauncher(
+            config: try MnemoConfig.load(from: supervisorSampleConfig)
+        )
+
+        await launcher.terminateManagedPIDs(
+            [Int(process.processIdentifier)],
+            on: 65_534,
+            gracePeriodMs: 100
+        )
+
+        XCTAssertFalse(process.isRunning)
+    }
+
+    func testDetachedSensitiveOutputIsRedactedAndOwnerOnly() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: root,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o755]
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let logURL = root.appendingPathComponent("engine.log")
+        try Data("stale output\n".utf8).write(to: logURL)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o644],
+            ofItemAtPath: logURL.path
+        )
+
+        let launcher = SystemProcessLauncher(
+            config: try MnemoConfig.load(from: supervisorSampleConfig)
+        )
+        let fakeCredential = "sm_" + String(repeating: "x", count: 32)
+        try launcher.spawnDetached(
+            "/bin/sh",
+            ["-c", "printf 'api key %s\\nready\\n' \"$FAKE_ENGINE_KEY\""],
+            logPath: logURL.path,
+            environment: ["FAKE_ENGINE_KEY": fakeCredential],
+            redactSensitiveOutput: true
+        )
+
+        var contents = ""
+        for _ in 0..<50 {
+            contents = (try? String(contentsOf: logURL, encoding: .utf8)) ?? ""
+            if contents.contains("ready") { break }
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+
+        XCTAssertTrue(contents.contains("api key [REDACTED]"))
+        XCTAssertTrue(contents.contains("ready"))
+        XCTAssertFalse(contents.contains(fakeCredential))
+        XCTAssertFalse(contents.contains("stale output"))
+        XCTAssertEqual(
+            try FileManager.default.attributesOfItem(atPath: root.path)[.posixPermissions] as? Int,
+            0o700
+        )
+        XCTAssertEqual(
+            try FileManager.default.attributesOfItem(atPath: logURL.path)[.posixPermissions] as? Int,
+            0o600
+        )
+    }
+
     private func status(_ executable: String, _ arguments: [String]) throws -> Int32 {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
@@ -48,6 +160,11 @@ final class EngineEgressSandboxTests: XCTestCase {
         XCTAssertEqual(environment["SUPERMEMORY_DATA_DIR"], "/Users/test/.supermemory/data")
         XCTAssertEqual(environment["SUPERMEMORY_DISABLE_TELEMETRY"], "1")
         XCTAssertEqual(environment["SUPERMEMORY_EMBEDDING_PROVIDER"], "local")
+        XCTAssertEqual(environment["SUPERMEMORY_EMBEDDING_RAM_LIMIT"], "512mb")
+        XCTAssertEqual(environment["SUPERMEMORY_INGEST_CONCURRENCY"], "1")
+        XCTAssertEqual(environment["SUPERMEMORY_LOCAL_EMBEDDING_POOL_SIZE"], "1")
+        XCTAssertEqual(environment["SUPERMEMORY_LOCAL_EMBEDDING_IDLE_TIMEOUT_MS"], "30000")
+        XCTAssertEqual(environment["BUN_GARBAGE_COLLECTOR_LEVEL"], "1")
         XCTAssertEqual(environment["SUPERMEMORY_NO_UPDATE_CHECK"], "1")
         XCTAssertEqual(environment["SUPERMEMORY_RUN_CRONS_AT_BOOT"], "0")
         XCTAssertEqual(environment["PORT"], "6767")

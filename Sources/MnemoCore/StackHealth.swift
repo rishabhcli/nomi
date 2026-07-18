@@ -23,11 +23,18 @@ public struct StackHealth: Equatable, Sendable {
     public let ollama: ProcessState
     public let engine: ProcessState
     public let smfs: ProcessState
+    public let additionalUnhealthyReasons: [String]
 
-    public init(ollama: ProcessState, engine: ProcessState, smfs: ProcessState) {
+    public init(
+        ollama: ProcessState,
+        engine: ProcessState,
+        smfs: ProcessState,
+        additionalUnhealthyReasons: [String] = []
+    ) {
         self.ollama = ollama
         self.engine = engine
         self.smfs = smfs
+        self.additionalUnhealthyReasons = additionalUnhealthyReasons
     }
 
     public var allHealthyAndLoopback: Bool {
@@ -35,6 +42,6 @@ public struct StackHealth: Equatable, Sendable {
     }
 
     public var unhealthyReasons: [String] {
-        [ollama, engine, smfs].compactMap(\.unhealthyReason)
+        [ollama, engine, smfs].compactMap(\.unhealthyReason) + additionalUnhealthyReasons
     }
 }

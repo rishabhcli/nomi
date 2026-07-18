@@ -15,6 +15,34 @@ final class AnswerSurfaceWiringTests: XCTestCase {
         XCTAssertTrue(surface.contains("SourceChipRow(sources: vm.state.sources)"))
     }
 
+    func testInputTrayRendersAboveTheGlassMaterial() throws {
+        let surface = try appSource("NotchSurfaceView.swift")
+        let container = try XCTUnwrap(surface.range(of: "return GlassEffectContainer"))
+        let trayOverlay = try XCTUnwrap(surface.range(
+            of: ".overlay(alignment: .bottom) {\n            if showsTray {\n                InputTray",
+            range: container.upperBound..<surface.endIndex
+        ))
+
+        XCTAssertFalse(
+            surface[container.lowerBound..<trayOverlay.lowerBound].contains("InputTray("),
+            "plain input content must not be composited underneath Liquid Glass"
+        )
+    }
+
+    func testInputSelectionKeepsWhiteTextReadable() throws {
+        let blocks = try appSource("SurfaceBlocks.swift")
+        let fieldStart = try XCTUnwrap(blocks.range(of: "TextField(vm.inputPlaceholder"))
+        let fieldEnd = try XCTUnwrap(blocks.range(
+            of: ".onSubmit",
+            range: fieldStart.upperBound..<blocks.endIndex
+        ))
+
+        XCTAssertFalse(
+            blocks[fieldStart.lowerBound..<fieldEnd.lowerBound].contains(".tint(.white)"),
+            "a white selection highlight makes the white query text disappear"
+        )
+    }
+
     func testAnswerActionsExposeExistingLocalCapabilities() throws {
         let blocks = try appSource("AnswerControls.swift")
 
