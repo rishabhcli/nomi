@@ -48,6 +48,10 @@ struct InputTray: View {
             .frame(height: Surface.bandHeight)
             HomeIndicator().frame(height: Surface.trayHandle)
         }
+        .accessibilityElement(children: .contain)
+        .accessibilitySortPriority(Double(
+            SurfaceUX.voiceOverSortPriority(for: searching ? .recovery : .queryField)
+        ))
     }
 
     /// Dark translucent pill: white text, light placeholder. While searching it
@@ -175,6 +179,10 @@ struct AnswerZone: View {
         .padding(.top, 16)
         .padding(.bottom, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .contain)
+        .accessibilitySortPriority(Double(
+            SurfaceUX.voiceOverSortPriority(for: .answer)
+        ))
     }
 
     /// Large clean white text, top-left. Unsupported sentences (M5) stay
@@ -194,6 +202,9 @@ struct AnswerZone: View {
             }
         }
         .fixedSize(horizontal: false, vertical: true)
+        .accessibilitySortPriority(Double(
+            SurfaceUX.voiceOverSortPriority(for: .answer)
+        ))
     }
 
     /// Always-on trust footer: "● 0 outbound · 0.4s · Grounded" — the per-query
@@ -222,22 +233,28 @@ struct AnswerZone: View {
 
     /// Terminal states stay minimal: the message plus one recovery action.
     @ViewBuilder private func terminalView(_ t: TerminalState) -> some View {
-        Text(NotchReducer.message(for: t))
-            .font(.system(size: Surface.answerFont))
-            .lineSpacing(5)
-            .foregroundStyle(.white)
-        switch t.recovery {
-        case .broaden:
-            Button("Broaden search") { vm.beginRecovery(.broaden) }.buttonStyle(.glass)
-        case .restartEngine:
-            Button("Restart engine") { vm.beginRecovery(.restartEngine) }.buttonStyle(.glassProminent)
-        case .loadModel:
-            Button("Load model") { vm.beginRecovery(.loadModel) }.buttonStyle(.glassProminent)
-        case .waitAndRetry:
-            Button("Try again") { vm.beginRecovery(.waitAndRetry) }.buttonStyle(.glass)
-        case .addFiles:
-            Button("Open memory folder") { vm.beginRecovery(.addFiles) }.buttonStyle(.glassProminent)
+        VStack(alignment: .leading, spacing: 12) {
+            Text(NotchReducer.message(for: t))
+                .font(.system(size: Surface.answerFont))
+                .lineSpacing(5)
+                .foregroundStyle(.white)
+            switch t.recovery {
+            case .broaden:
+                Button("Broaden search") { vm.beginRecovery(.broaden) }.buttonStyle(.glass)
+            case .restartEngine:
+                Button("Restart engine") { vm.beginRecovery(.restartEngine) }.buttonStyle(.glassProminent)
+            case .loadModel:
+                Button("Load model") { vm.beginRecovery(.loadModel) }.buttonStyle(.glassProminent)
+            case .waitAndRetry:
+                Button("Try again") { vm.beginRecovery(.waitAndRetry) }.buttonStyle(.glass)
+            case .addFiles:
+                Button("Open memory folder") { vm.beginRecovery(.addFiles) }.buttonStyle(.glassProminent)
+            }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilitySortPriority(Double(
+            SurfaceUX.voiceOverSortPriority(for: .recovery)
+        ))
     }
 
     private func markdown(_ s: String) -> AttributedString {
@@ -251,22 +268,44 @@ struct AnswerZone: View {
 // MARK: - 6-dot comet spinner
 
 struct SixDotSpinner: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
-        TimelineView(.animation) { tl in
-            let t = tl.date.timeIntervalSinceReferenceDate
-            Canvas { ctx, size in
-                let c = CGPoint(x: size.width / 2, y: size.height / 2)
-                let ring = Surface.spinnerRing / 2
-                for i in 0..<6 {
-                    let a = (Double(i) / 6.0) * 2 * .pi + t * 2 * .pi * Surface.spinnerRPS
-                    let p = CGPoint(x: c.x + ring * cos(a), y: c.y + ring * sin(a))
-                    let opacity = 1.0 - Double(i) * 0.125
-                    let d = Surface.spinnerDot
-                    ctx.fill(Path(ellipseIn: CGRect(x: p.x - d/2, y: p.y - d/2, width: d, height: d)),
-                             with: .color(.white.opacity(opacity)))
+        Group {
+            if reduceMotion {
+                spinnerFrame(time: 0)
+            } else {
+                TimelineView(.animation) { timeline in
+                    spinnerFrame(time: timeline.date.timeIntervalSinceReferenceDate)
                 }
             }
         }
         .accessibilityLabel("Working")
+    }
+
+    private func spinnerFrame(time: TimeInterval) -> some View {
+        Canvas { ctx, size in
+            let center = CGPoint(x: size.width / 2, y: size.height / 2)
+            let ring = Surface.spinnerRing / 2
+            for index in 0..<6 {
+                let angle = (Double(index) / 6.0) * 2 * .pi
+                    + time * 2 * .pi * Surface.spinnerRPS
+                let point = CGPoint(
+                    x: center.x + ring * cos(angle),
+                    y: center.y + ring * sin(angle)
+                )
+                let opacity = 1.0 - Double(index) * 0.125
+                let diameter = Surface.spinnerDot
+                ctx.fill(
+                    Path(ellipseIn: CGRect(
+                        x: point.x - diameter / 2,
+                        y: point.y - diameter / 2,
+                        width: diameter,
+                        height: diameter
+                    )),
+                    with: .color(.white.opacity(opacity))
+                )
+            }
+        }
     }
 }

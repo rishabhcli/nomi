@@ -37,6 +37,18 @@ final class MicEnvelopeTests: XCTestCase {
         XCTAssertGreaterThan(low.waveHeight, 0, "idle flow: never dead-static")
         XCTAssertLessThanOrEqual(high.scale, 1.06 + 0.001)
     }
+
+    func testReduceMotionKeepsOrbAtAFixedScale() {
+        let silent = OrbUniforms(amplitude: 0)
+        let loud = OrbUniforms(amplitude: 1)
+
+        XCTAssertEqual(silent.displayScale(reduceMotion: true), 1)
+        XCTAssertEqual(loud.displayScale(reduceMotion: true), 1)
+        XCTAssertGreaterThan(
+            loud.displayScale(reduceMotion: false),
+            silent.displayScale(reduceMotion: false)
+        )
+    }
 }
 
 /// The render-side smoother that turns the ~12–45 Hz mic envelope into a fluid,

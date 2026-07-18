@@ -45,6 +45,9 @@ struct SourceChipRow: View {
                 }
             }
             .accessibilityElement(children: .contain)
+            .accessibilitySortPriority(Double(
+                SurfaceUX.voiceOverSortPriority(for: .sources)
+            ))
         }
     }
 

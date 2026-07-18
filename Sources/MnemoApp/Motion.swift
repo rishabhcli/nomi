@@ -17,6 +17,13 @@ enum Motion {
         reduceMotion ? .easeInOut(duration: 0.20) : base
     }
 
+    /// Width and height changes are spatial motion, not a cross-fade. Disable
+    /// that animation entirely when Reduce Motion is enabled; content swaps
+    /// still use the opacity-only transition below.
+    static func geometry(_ base: Animation, reduceMotion: Bool) -> Animation? {
+        reduceMotion ? nil : base
+    }
+
     /// The signature blur-morph (UI.md §6): incoming content arrives blurred
     /// 8→0 from scale 1.025, outgoing leaves blurring 0→9 and shrinking to
     /// 0.975. The blur masks the content pop so swaps read as a soft dissolve

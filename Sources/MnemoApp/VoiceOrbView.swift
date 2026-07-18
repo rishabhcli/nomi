@@ -33,7 +33,7 @@ struct VoiceOrbView: View {
                 .frame(width: Self.diameter, height: Self.diameter)
                 .modifier(OrbShaderModifier(time: t, uniforms: uniforms,
                                             reduceMotion: reduceMotion, diameter: Self.diameter))
-                .scaleEffect(uniforms.scale + breathe)
+                .scaleEffect(uniforms.displayScale(reduceMotion: reduceMotion) + breathe)
                 .shadow(color: .black.opacity(0.45), radius: 16, y: 7)   // contact shadow
                 .accessibilityLabel("Listening")
                 .accessibilityValue("Input level \(Int(amp * 100)) percent")

@@ -116,7 +116,7 @@ struct NotchSurfaceView: View {
         // text reflow changes height in quantized steps without continuously
         // retargeting that spring as tokens stream.
         .animation(
-            Motion.adaptive(spring, reduceMotion: reduceMotion),
+            Motion.geometry(spring, reduceMotion: reduceMotion),
             value: SurfaceAnimationKey(phase: phase, listening: listening)
         )
         // Voice gestures are attached only to the collar overlay above. The
@@ -260,6 +260,9 @@ struct NotchSurfaceView: View {
                     .foregroundStyle(.white)
                     .lineLimit(3)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilitySortPriority(Double(
+                        SurfaceUX.voiceOverSortPriority(for: .queryField)
+                    ))
                 ReasoningTraceView(
                     steps: vm.state.reasoning,
                     status: vm.state.status,
@@ -275,6 +278,9 @@ struct NotchSurfaceView: View {
         }
         .frame(height: Surface.searchingBodyHeight)
         .scrollBounceBehavior(.basedOnSize)
+        .accessibilitySortPriority(Double(
+            SurfaceUX.voiceOverSortPriority(for: .queryField)
+        ))
     }
 
     /// Answer area (reference): white text, one quiet source chip row, outline
@@ -289,6 +295,9 @@ struct NotchSurfaceView: View {
         }
         .frame(height: min(max(answerHeight, 1), Surface.answerCap))
         .scrollBounceBehavior(.basedOnSize)
+        .accessibilitySortPriority(Double(
+            SurfaceUX.voiceOverSortPriority(for: .answer)
+        ))
     }
 
     /// Privacy folded into a tiny dot: green = 0 egress.
@@ -301,6 +310,9 @@ struct NotchSurfaceView: View {
                 .help(vm.privacy == .clean ? "On-device · 0 observed outbound" : "Outbound observed — see log")
                 .accessibilityLabel("Privacy status")
                 .accessibilityValue(privacyAccessibilityValue)
+                .accessibilitySortPriority(Double(
+                    SurfaceUX.voiceOverSortPriority(for: .privacy)
+                ))
         }
     }
 

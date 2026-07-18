@@ -94,4 +94,10 @@ public struct OrbUniforms: Equatable, Sendable {
         saturation = 0.15 + amp * 0.85      // near-gray → full spectrum
         scale = 1.0 + amp * 0.05            // subtle swell (UI.md §12.2: ≤ ~5%)
     }
+
+    /// Reduced Motion keeps the listening target physically stable while the
+    /// brightness overlay still communicates live microphone activity.
+    public func displayScale(reduceMotion: Bool) -> Double {
+        reduceMotion ? 1 : scale
+    }
 }

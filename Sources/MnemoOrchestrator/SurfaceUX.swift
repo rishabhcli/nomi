@@ -120,7 +120,9 @@ public enum SurfaceUX {
         case recovery = 4
         case privacy = 5
 
-        public var sortPriority: Int { rawValue }
+        /// SwiftUI reads larger sort priorities before smaller ones. Keep the
+        /// enum in the human reading order and invert it at the API boundary.
+        public var sortPriority: Int { Self.allCases.count - rawValue }
     }
 
     public static func voiceOverSortPriority(for element: VoiceOverOrder) -> Int {

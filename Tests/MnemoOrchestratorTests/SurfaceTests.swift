@@ -97,10 +97,18 @@ final class SurfaceErrorRecoveryTests: XCTestCase {
 
 final class SurfaceVoiceOverTests: XCTestCase {
     func testE0005_rotorOrderIsStable() {
-        XCTAssertLessThan(SurfaceUX.voiceOverSortPriority(for: .queryField),
-                          SurfaceUX.voiceOverSortPriority(for: .answer))
-        XCTAssertLessThan(SurfaceUX.voiceOverSortPriority(for: .answer),
-                          SurfaceUX.voiceOverSortPriority(for: .privacy))
+        let order = SurfaceUX.VoiceOverOrder.allCases.map(
+            SurfaceUX.voiceOverSortPriority(for:)
+        )
+
+        XCTAssertEqual(Set(order).count, order.count)
+        for (earlier, later) in zip(order, order.dropFirst()) {
+            XCTAssertGreaterThan(
+                earlier,
+                later,
+                "SwiftUI reads higher accessibility sort priorities first"
+            )
+        }
     }
 }
 

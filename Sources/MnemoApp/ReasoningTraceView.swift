@@ -54,7 +54,6 @@ struct ReasoningTraceView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(expanded ? "Collapse reasoning trace" : "Expand reasoning trace")
-                .accessibilitySortPriority(Double(SurfaceUX.voiceOverSortPriority(for: .reasoningTrace)))
 
                 if expanded {
                     VStack(alignment: .leading, spacing: 6) {
@@ -100,6 +99,9 @@ struct ReasoningTraceView: View {
             .transition(Motion.adaptiveTransition(reduceMotion: reduceMotion))
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Reasoning trace")
+            .accessibilitySortPriority(Double(
+                SurfaceUX.voiceOverSortPriority(for: .reasoningTrace)
+            ))
             .onChange(of: hasAnswer) { _, answerArrived in
                 guard answerArrived else { return }
                 withAnimation(Motion.adaptive(Motion.dissolve, reduceMotion: reduceMotion)) {
