@@ -252,6 +252,7 @@ struct NotchSurfaceView: View {
                     hasAnswer: false,
                     reduceMotion: reduceMotion
                 )
+                SourceChipRow(sources: vm.state.sources)
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 14)
@@ -264,7 +265,7 @@ struct NotchSurfaceView: View {
     /// thumbs. Scrolls only past the cap.
     private var answerZone: some View {
         ScrollView(.vertical, showsIndicators: false) {
-            AnswerZone(vm: vm, dictation: dictation)
+            AnswerZone(vm: vm, dictation: dictation, narrator: narrator)
                 .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { measured in
                     let next = SurfaceAnswerLayout.quantizedHeight(measured, cap: Surface.answerCap)
                     if next != answerHeight { answerHeight = next }

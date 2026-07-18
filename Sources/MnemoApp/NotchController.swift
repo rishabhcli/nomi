@@ -15,13 +15,14 @@ final class NotchController {
     let dictation: Dictation
     let narrator: Narrator
     let handler: AppCommandHandler
-    let notchRect: CGRect
-    let screenFrame: CGRect
+    private(set) var notchRect: CGRect
+    private(set) var screenFrame: CGRect
     /// Deep-observability bus for the dev dashboard; nil unless devtools enabled.
     let devTrace: DevTrace?
     private var syncTask: Task<Void, Never>?
     private var stackTask: Task<Void, Never>?
     private var volumeActivityTask: Task<Void, Never>?
+    private var hosting: NSHostingView<NotchSurfaceView>?
 
     init(config: MnemoConfig) {
         // Localhost requests are auto-authenticated by the self-hosted engine;
@@ -162,6 +163,7 @@ final class NotchController {
         self.panel = NotchPanel(contentRect: rect)
         let hosting = NSHostingView(
             rootView: NotchSurfaceView(vm: vm, dictation: dictation, narrator: narrator, notchSize: notch.size))
+        self.hosting = hosting
         hosting.sizingOptions = []   // content must never drive the window size
         panel.contentView = hosting
         // First frame must be correct BEFORE the panel is ever visible
@@ -229,8 +231,40 @@ final class NotchController {
         // streaming (phase can be .answering mid-stream), or a hover-out/in
         // spawns a duplicate session on top of the in-flight one.
         guard vm.state.phase == .idle, !vm.isQuerying else { return }
+        reanchorToPointerDisplay()
         vm.summon()
         panel.makeKeyAndOrderFront(nil)   // caret live immediately
+    }
+
+    /// Hover and hotkey summons follow the pointer across displays. Re-anchoring
+    /// happens only while idle, never during a visible morph or live query.
+    private func reanchorToPointerDisplay() {
+        let location = NSEvent.mouseLocation
+        guard let screen = NSScreen.screens.first(where: {
+            NSMouseInRect(location, $0.frame, false)
+        }) ?? NSScreen.main else { return }
+        let notch = screen.mnemoNotchRectOrVirtual
+        guard screen.frame != screenFrame || notch != notchRect else { return }
+
+        let panelSize = CGSize(
+            width: Surface.readWidth + 2 * Surface.shadowBleed,
+            height: max(notch.height, 24) + Surface.maxBodyHeight + Surface.shadowBleed
+        )
+        let frame = NotchGeometry.panelRect(
+            screenFrame: screen.frame,
+            notch: notch,
+            panelSize: panelSize
+        )
+        screenFrame = screen.frame
+        notchRect = notch
+        panel.setFrame(frame, display: true)
+        hosting?.rootView = NotchSurfaceView(
+            vm: vm,
+            dictation: dictation,
+            narrator: narrator,
+            notchSize: notch.size
+        )
+        hosting?.layoutSubtreeIfNeeded()
     }
 
     func dismiss() {

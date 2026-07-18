@@ -16,7 +16,10 @@ echo "== building MnemoApp ($CONFIG) with $DEVELOPER_DIR =="
 swift build --product MnemoApp -c "$CONFIG"
 BIN_DIR=".build/$CONFIG"
 BIN="$BIN_DIR/MnemoApp"
-RES_BUNDLE="$BIN_DIR/Mnemo_MnemoApp.bundle"
+RESOURCE_BUNDLES=(
+  "$BIN_DIR/Mnemo_MnemoApp.bundle"
+  "$BIN_DIR/Mnemo_MnemoDevServer.bundle"
+)
 [ -x "$BIN" ] || { echo "missing binary $BIN"; exit 1; }
 
 APP=".build/Mnemo.app"
@@ -25,9 +28,13 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 cp "$BIN" "$APP/Contents/MacOS/MnemoApp"
-# The SwiftPM resource bundle (default.metallib for the voice orb) — Bundle.module
-# resolves it from Contents/Resources in a packaged app.
-[ -d "$RES_BUNDLE" ] && cp -R "$RES_BUNDLE" "$APP/Contents/Resources/"
+# Bundle.module resolves every SwiftPM target's resources from Contents/Resources
+# in a packaged app. MnemoApp owns the Metal library; MnemoDevServer owns the
+# self-contained observatory dashboard. Omitting either makes Bundle.module trap.
+for bundle in "${RESOURCE_BUNDLES[@]}"; do
+  [ -d "$bundle" ] || { echo "missing resource bundle $bundle"; exit 1; }
+  cp -R "$bundle" "$APP/Contents/Resources/"
+done
 # Ship the config so the app finds it when launched via `open` (cwd = /).
 cp mnemo.toml "$APP/Contents/Resources/mnemo.toml"
 
@@ -69,9 +76,9 @@ fi
 # A stable certificate gives TCC a stable designated requirement. Ad-hoc signing
 # keys grants to the binary CDHash, which changes on every rebuild and makes
 # macOS ask for Microphone and Speech Recognition again.
-[ -d "$APP/Contents/Resources/Mnemo_MnemoApp.bundle" ] && \
-  codesign --force --sign "$SIGN_IDENTITY" --timestamp=none \
-    "$APP/Contents/Resources/Mnemo_MnemoApp.bundle" 2>/dev/null || true
+for bundle in "$APP"/Contents/Resources/Mnemo_*.bundle; do
+  codesign --force --sign "$SIGN_IDENTITY" --timestamp=none "$bundle"
+done
 codesign --force --sign "$SIGN_IDENTITY" --timestamp=none "$APP"
 
 echo "== done: $APP =="

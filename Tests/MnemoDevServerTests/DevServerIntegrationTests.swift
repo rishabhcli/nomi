@@ -72,6 +72,28 @@ final class DevServerIntegrationTests: XCTestCase {
         XCTAssertEqual((resp as? HTTPURLResponse)?.statusCode, 401)
     }
 
+    func testListenerBindsExplicitIPv4Loopback() async throws {
+        let ds = IntegrationDataSource()
+        let (server, port) = try await startOnEphemeralPort(ds, token: "itok")
+        defer { server.stop() }
+
+        let output = Pipe()
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+        process.arguments = ["-nP", "-iTCP:\(port)", "-sTCP:LISTEN"]
+        process.standardOutput = output
+        try process.run()
+        process.waitUntilExit()
+        let sockets = String(
+            decoding: output.fileHandleForReading.readDataToEndOfFile(),
+            as: UTF8.self
+        )
+
+        XCTAssertEqual(process.terminationStatus, 0, sockets)
+        XCTAssertTrue(sockets.contains("127.0.0.1:\(port)"), sockets)
+        XCTAssertFalse(sockets.contains("*:\(port)"), sockets)
+    }
+
     func testEventsStreamsSnapshotThenLiveTrace() async throws {
         let ds = IntegrationDataSource()
         let (server, port) = try await startOnEphemeralPort(ds, token: "itok")

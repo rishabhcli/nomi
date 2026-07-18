@@ -19,4 +19,13 @@ final class DashboardPageTests: XCTestCase {
         XCTAssertFalse(html.contains("//cdn"), "no CDN references allowed")
         XCTAssertFalse(html.lowercased().contains("<script src"), "no external scripts — all JS is inline")
     }
+
+    func testMissingResourceBundleFallsBackWithoutCrashing() {
+        let html = DashboardPage.html(resourceBundles: [])
+
+        XCTAssertTrue(html.contains("resource is missing"))
+        XCTAssertTrue(html.contains("__MNEMO_TOKEN__"))
+        XCTAssertFalse(html.contains("http://"))
+        XCTAssertFalse(html.contains("https://"))
+    }
 }

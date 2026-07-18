@@ -35,4 +35,10 @@ final class PermissionOnboardingWiringTests: XCTestCase {
         XCTAssertTrue(script.contains("Apple Development"))
         XCTAssertFalse(script.contains("codesign --force --sign - \"$APP\""))
     }
+
+    func testPackagedAppIncludesEveryRuntimeResourceBundle() throws {
+        let script = try String(contentsOfFile: "scripts/build-app.sh", encoding: .utf8)
+        XCTAssertTrue(script.contains("Mnemo_MnemoApp.bundle"))
+        XCTAssertTrue(script.contains("Mnemo_MnemoDevServer.bundle"))
+    }
 }

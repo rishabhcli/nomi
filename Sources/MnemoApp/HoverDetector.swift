@@ -8,7 +8,8 @@ import MnemoOrchestrator
 /// Decisions are the pure `NotchHover` functions so they're covered by tests.
 @MainActor
 final class HoverDetector {
-    private var monitor: Any?
+    private var globalMonitor: Any?
+    private var localMonitor: Any?
     private var leaveWork: DispatchWorkItem?
     private let hoverZonePx: CGFloat
     private let dwell: TimeInterval = 0.4
@@ -28,20 +29,31 @@ final class HoverDetector {
     }
 
     func start() {
-        monitor = NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved) { [weak self] _ in
-            guard let self else { return }
-            let loc = NSEvent.mouseLocation
-            guard let screen = NSScreen.screens.first(where: { NSMouseInRect(loc, $0.frame, false) })
-                    ?? NSScreen.main else { return }
-            let notch = screen.mnemoNotchRectOrVirtual
-            if NotchHover.isArmed(cursor: loc, notchRect: notch, screenFrame: screen.frame,
-                                  hoverZonePx: hoverZonePx) {
-                cancelLeave()
-                self.onArm()
-                return
-            }
-            trackLeave(cursor: loc)
+        guard globalMonitor == nil, localMonitor == nil else { return }
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved) { [weak self] _ in
+            self?.handleMouseMove()
         }
+        // Global monitors do not receive events delivered to this app. Once the
+        // panel is key, the local monitor keeps mouse-out collapse responsive.
+        localMonitor = NSEvent.addLocalMonitorForEvents(matching: .mouseMoved) { [weak self] event in
+            self?.handleMouseMove()
+            return event
+        }
+    }
+
+    private func handleMouseMove() {
+        let location = NSEvent.mouseLocation
+        guard let screen = NSScreen.screens.first(where: {
+            NSMouseInRect(location, $0.frame, false)
+        }) ?? NSScreen.main else { return }
+        let notch = screen.mnemoNotchRectOrVirtual
+        if NotchHover.isArmed(cursor: location, notchRect: notch, screenFrame: screen.frame,
+                              hoverZonePx: hoverZonePx) {
+            cancelLeave()
+            onArm()
+            return
+        }
+        trackLeave(cursor: location)
     }
 
     /// Mouse-out collapse with a dwell: fires only after the cursor has been
@@ -67,8 +79,10 @@ final class HoverDetector {
     }
 
     func stop() {
-        if let monitor { NSEvent.removeMonitor(monitor) }
-        monitor = nil
+        if let globalMonitor { NSEvent.removeMonitor(globalMonitor) }
+        if let localMonitor { NSEvent.removeMonitor(localMonitor) }
+        globalMonitor = nil
+        localMonitor = nil
         cancelLeave()
     }
 }

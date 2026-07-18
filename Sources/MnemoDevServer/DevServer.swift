@@ -4,11 +4,11 @@ import MnemoCore
 
 public enum DevServerError: Error { case badPort }
 
-/// The loopback-only HTTP/SSE transport. Binds **127.0.0.1 exclusively** (via
-/// `requiredInterfaceType = .loopback` — the product invariant), parses each
-/// request, hands it to the pure `Router`, and for `/events` keeps the socket
-/// open and streams the `DevTrace` feed. A single subscription to the trace bus
-/// fans out to every connected browser tab.
+/// The loopback-only HTTP/SSE transport. Binds **127.0.0.1 exclusively** with
+/// an explicit local endpoint plus a loopback-interface requirement, parses
+/// each request, hands it to the pure `Router`, and for `/events` keeps the
+/// socket open and streams the `DevTrace` feed. A single subscription to the
+/// trace bus fans out to every connected browser tab.
 public final class DevServer: @unchecked Sendable {
     public let token: String
     public let requestedPort: UInt16
@@ -35,10 +35,11 @@ public final class DevServer: @unchecked Sendable {
 
     public func start() throws {
         let params = NWParameters.tcp
-        params.requiredInterfaceType = .loopback     // 127.0.0.1 / ::1 ONLY — invariant
-        params.allowLocalEndpointReuse = true
         guard let nwPort = NWEndpoint.Port(rawValue: requestedPort) else { throw DevServerError.badPort }
-        let listener = try NWListener(using: params, on: nwPort)
+        params.requiredInterfaceType = .loopback
+        params.requiredLocalEndpoint = .hostPort(host: .ipv4(.loopback), port: nwPort)
+        params.allowLocalEndpointReuse = true
+        let listener = try NWListener(using: params)
         listener.stateUpdateHandler = { [weak self, weak listener] state in
             if case .ready = state { self?.queue.async { self?.readyPort = listener?.port?.rawValue } }
         }

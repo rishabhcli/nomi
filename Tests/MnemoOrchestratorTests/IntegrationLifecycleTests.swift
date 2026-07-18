@@ -188,12 +188,19 @@ final class ModelUnloadRecoveryIntegrationTests: XCTestCase {
 // MARK: - H-0008 / scenario 7: smfs semantic vs literal grep parity
 
 final class SMFSGrepParityIntegrationTests: XCTestCase {
-    func testH0008_keywordBackstopRescuesLiteralTokenMiss() {
+    func testH0008_keywordBackstopRescuesLiteralTokenMiss() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mnemo-smfs-parity-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data("Aurora migration owner: Platform team.\n".utf8)
+            .write(to: root.appendingPathComponent("migration-notes.md"))
+
         let ev = [BeatsSiriFixtures.timelineA]
         let (merged, note) = KeywordBackstop.rescue(query: "Aurora migration May 5",
-                                                    evidence: ev, mountRoot: "/tmp")
+                                                    evidence: ev, mountRoot: root.path)
         XCTAssertNotNil(note, "literal rescue must fire when salient token missing from semantic hits")
-        XCTAssertGreaterThanOrEqual(merged.count, ev.count)
+        XCTAssertGreaterThan(merged.count, ev.count)
     }
 }
 

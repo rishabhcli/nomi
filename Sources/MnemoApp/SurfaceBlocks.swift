@@ -139,6 +139,7 @@ struct HomeIndicator: View {
 struct AnswerZone: View {
     @ObservedObject var vm: NotchViewModel
     @ObservedObject var dictation: Dictation
+    @ObservedObject var narrator: Narrator
     @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var highContrast: Bool { contrast == .increased }
@@ -162,7 +163,9 @@ struct AnswerZone: View {
                 terminalView(terminal)
             } else if !vm.state.answer.isEmpty {
                 answerText
-                sourceChips
+                SourceChipRow(sources: vm.state.sources)
+                AnswerActionRow(vm: vm, narrator: narrator)
+                FollowUpGrid(vm: vm)
             }
             if !vm.state.answer.isEmpty || vm.state.terminal != nil {
                 trustFooter
@@ -191,62 +194,6 @@ struct AnswerZone: View {
             }
         }
         .fixedSize(horizontal: false, vertical: true)
-    }
-
-    /// Quiet gray chips — the reference's "Riddleness" chip, one per source.
-    @ViewBuilder private var sourceChips: some View {
-        if !vm.state.sources.isEmpty {
-            let chipCount = min(3, vm.state.sources.count)
-            let chipTextWidth = NotchInteraction.sourceChipTextWidth(
-                surfaceWidth: Surface.readWidth,
-                contentPadding: 20,
-                chipPadding: 10,
-                spacing: 6,
-                chipCount: chipCount
-            )
-            HStack(spacing: 6) {
-                ForEach(vm.state.sources.prefix(3), id: \.docId) { card in
-                    Button { reveal(card.path) } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(card.title)
-                                .font(.system(size: 12))
-                                .foregroundStyle(.white.opacity(highContrast ? 1.0 : 0.85))
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                                .frame(width: chipTextWidth, alignment: .leading)
-                            relevanceBar(card.relevance, width: chipTextWidth)
-                        }
-                        .padding(.horizontal, 10).padding(.vertical, 6)
-                        .background(Capsule().fill(.white.opacity(
-                            SurfaceUX.GlassHierarchy.chipFill(highContrast: highContrast))))
-                        .overlay(Capsule().stroke(.white.opacity(highContrast ? 0.3 : 0.12), lineWidth: 0.5))
-                    }
-                    .buttonStyle(.plain)
-                    .help(chipHelp(card))
-                    .accessibilityLabel(chipAXLabel(card))
-                }
-            }
-        }
-    }
-
-    /// Thin relevance bar (0…1 of `width`) — the mockup's ▓▓▓▓░ cue, kept quiet.
-    private func relevanceBar(_ r: Double, width: CGFloat) -> some View {
-        let frac = CGFloat(min(1, max(0, r)))
-        return ZStack(alignment: .leading) {
-            Capsule().fill(.white.opacity(highContrast ? 0.22 : 0.12)).frame(width: width, height: 2)
-            Capsule().fill(.white.opacity(highContrast ? 0.85 : 0.55)).frame(width: max(2, width * frac), height: 2)
-        }
-    }
-
-    private func chipHelp(_ card: SourceCard) -> String {
-        guard let t = RelativeTime.format(iso: card.updatedAt) else { return card.path }
-        return "\(card.path) · updated \(t)"
-    }
-
-    private func chipAXLabel(_ card: SourceCard) -> String {
-        var s = "Source: \(card.title), relevance \(Int((card.relevance * 100).rounded())) percent"
-        if let t = RelativeTime.format(iso: card.updatedAt) { s += ", updated \(t)" }
-        return s
     }
 
     /// Always-on trust footer: "● 0 outbound · 0.4s · Grounded" — the per-query
@@ -299,10 +246,6 @@ struct AnswerZone: View {
             ?? AttributedString(s)
     }
 
-    private func reveal(_ path: String) {
-        NSWorkspace.shared.activateFileViewerSelecting(
-            [URL(fileURLWithPath: (path as NSString).expandingTildeInPath)])
-    }
 }
 
 // MARK: - 6-dot comet spinner

@@ -154,7 +154,8 @@ final class DebugHooks {
         // ScrollView/TextField are AppKit-backed and render as placeholders
         // offscreen; render the pure-SwiftUI answer zone separately.
         if phase == .answering {
-            let blocks = AnswerZone(vm: controller.vm, dictation: controller.dictation)
+            let blocks = AnswerZone(vm: controller.vm, dictation: controller.dictation,
+                                    narrator: controller.narrator)
                 .frame(width: Surface.readWidth)
                 .background(Color.black)
             write(view: blocks, to: "/tmp/mnemo-snap-answer-blocks.png")

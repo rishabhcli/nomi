@@ -426,6 +426,13 @@ final class NotchViewModel: ObservableObject {
         }
     }
 
+    func submitSuggestion(_ suggestion: String) {
+        let query = suggestion.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty, activeQueryTask == nil else { return }
+        state.query = query
+        beginSubmit()
+    }
+
     func beginRecovery(_ recovery: TerminalState.Recovery) {
         beginOwnedOperation { viewModel, generation in
             await viewModel.recover(recovery, generation: generation)

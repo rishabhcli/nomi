@@ -371,6 +371,9 @@ final class EngineEgressSandboxTests: XCTestCase {
         let config = try MnemoConfig.load(from: supervisorSampleConfig)
         let snapshot = SystemProcessLauncher(config: config).observedStackConnections()
         if case let .unavailable(failure) = snapshot {
+            if failure == .managedProcessesNotFound {
+                throw XCTSkip("the local Mnemo stack is not running")
+            }
             XCTFail("live stack audit unavailable: \(failure)")
             return
         }
